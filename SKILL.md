@@ -43,8 +43,12 @@ echo "PROMPT" | python scripts/dispatch.py <provider> [--label NAME] [--model M]
 # Check which providers are installed / keyed / ready (offline):
 python scripts/dispatch.py --doctor
 
-# Adversarially cross-check a claim (anti-hallucination); --json for agents:
-echo "CLAIM" | python scripts/verify.py --critics <a,b> [--json]
+# Adversarially cross-check a claim; --check-evidence runs the named proof
+# (earns exit 0); --json for agents:
+echo "CLAIM" | python scripts/verify.py --critics <a,b> [--check-evidence] [--json]
+
+# Proof-of-work / replay gate — prove a claim with a LOCAL check, not an opinion:
+python scripts/prove.py --cmd "pytest -q" --expect-rc 0    # or --files / --url
 
 # See spend / success rates:
 python scripts/usage_report.py [--html]

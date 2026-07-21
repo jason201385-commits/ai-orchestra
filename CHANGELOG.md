@@ -8,17 +8,29 @@
 源自用 ai-orchestra 自我審查（Grok 外部審查 + Claude 交叉查核）後的第一批改進。
 
 ### Added
+- **`prove.py`** — 回放／工作證明閘門：用本機檢查（跑指令＋比對 rc/輸出、
+  檔案存在且非空、檔案含某字串、URL 回 2xx）證明宣稱，而不是再問一個模型。
+  check 函式可被匯入；每次執行記進 ledger（provider `prove`）。
+- **`verify.py --check-evidence`** — 實際去跑每個對手指名的 `EVIDENCE_SPEC`
+  （檔案／URL；加 `--run-commands` 才執行指令）。**這是唯一能掙到 exit 0 的路**：
+  全數支持 ＋ 證據檢查通過才回 0（VERIFIED）；證據沒過回 2。單靠共識永遠不是 0。
 - `dispatch.py --doctor` — 離線檢查每個已啟用供應商是否就緒（CLI 在 PATH、
   API key 是否設定、base_url 是否安全），解決冷啟動最大的卡點。
 - 供應商設定新增 `adversary = true` 旗標，明確指定 `verify.py` 的預設對手，
   取代脆弱的 `role` 子字串比對（舊行為保留為後備）。
 - `verify.py --json` — 給 agent／腳本用的機器可讀報告。
-- `tests/test_verify.py` — 補上旗艦功能過去缺的測試（判定解析、退出碼矩陣、
-  對手選擇），共 14 個測試。
+- `tests/test_verify.py`（含證據迴路）與 `tests/test_prove.py` — 補上旗艦功能
+  過去缺的測試（判定解析、退出碼矩陣、證據掙 exit 0、對手選擇、prove 原語）。
 
 ### Changed
 - `verify.py` 的對手改為**平行**執行（先前為序列，是純粹的延遲成本）。
 - 退出碼決策抽成純函式 `synthesize()`，可測試、可被 `--json` 重用。
+- **退出碼語意**：exit 0 從「永不出現」改為「唯有 `--check-evidence` 且證據
+  檢查通過才出現」——回應「共識不是證據，但證明是」。
+
+### Fixed
+- `prove.py` / `verify.py` 不再於 import 時覆寫 `sys.stdout/stderr`（改成只在
+  `main()` 內冪等設定），修掉互相 import 造成的雙重包裹與關閉期 I/O 錯誤。
 
 ## [0.1.0] — 2026-07-21
 

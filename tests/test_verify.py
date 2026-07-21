@@ -94,6 +94,66 @@ class SynthesizeTests(unittest.TestCase):
                                     f"exit 0 must never happen: {combo}")
 
 
+class EvidenceSynthesisTests(unittest.TestCase):
+    def test_evidence_earns_exit_0(self):
+        code, label, _ = verify.synthesize(
+            ["SUPPORTED", "SUPPORTED"], evidence_ran=True, evidence_ok=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(label, "VERIFIED")
+
+    def test_failed_evidence_blocks(self):
+        code, label, _ = verify.synthesize(
+            ["SUPPORTED"], evidence_ran=True, evidence_ok=False)
+        self.assertEqual(code, 2)
+        self.assertEqual(label, "DO_NOT_SHIP")
+
+    def test_no_evidence_stays_unverified(self):
+        # default (no evidence run) — consensus never earns 0
+        self.assertEqual(verify.synthesize(["SUPPORTED", "SUPPORTED"])[0], 3)
+
+    def test_refute_beats_passing_evidence(self):
+        # a refutal is decisive even if some evidence passed
+        self.assertEqual(
+            verify.synthesize(["REFUTED", "SUPPORTED"],
+                              evidence_ran=True, evidence_ok=True)[0], 2)
+
+
+class ParseEvidenceTests(unittest.TestCase):
+    def test_typed_evidence(self):
+        self.assertEqual(
+            verify.parse_evidence("EVIDENCE_TYPE: file\nEVIDENCE_SPEC: src/foo.py"),
+            ("file", "src/foo.py"))
+        self.assertEqual(
+            verify.parse_evidence("**EVIDENCE_TYPE:** cmd\n**EVIDENCE_SPEC:** `pytest -q`"),
+            ("cmd", "pytest -q"))
+
+    def test_none_and_missing(self):
+        self.assertEqual(
+            verify.parse_evidence("EVIDENCE_TYPE: none\nEVIDENCE_SPEC:"), (None, None))
+        self.assertEqual(verify.parse_evidence("no evidence lines"), (None, None))
+
+
+class RunEvidenceTests(unittest.TestCase):
+    def test_cmd_skipped_without_optin(self):
+        ran, ok, detail = verify.run_one_evidence("cmd", "pytest -q", False, 10)
+        self.assertFalse(ran)
+        self.assertIn("run-commands", detail)
+
+    def test_file_evidence(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "a.py"
+            f.write_text("def foo():\n    pass\n", encoding="utf-8")
+            self.assertEqual(verify.run_one_evidence("file", str(f), False, 10)[:2],
+                             (True, True))
+            self.assertEqual(
+                verify.run_one_evidence("file", f'{f} contains "def foo"', False, 10)[:2],
+                (True, True))
+            self.assertEqual(
+                verify.run_one_evidence("file", str(Path(d) / "missing.py"), False, 10)[:2],
+                (True, False))
+
+
 class DefaultCriticsTests(unittest.TestCase):
     def test_prefers_explicit_adversary_flag(self):
         provs = {

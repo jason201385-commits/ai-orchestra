@@ -14,8 +14,8 @@ what actually reduces hallucination (see docs/anti-hallucination.md):
 
 Usage:
     echo "the claim / answer to check" | python verify.py --critics codex,deepseek
-    python verify.py --claim "X does Y" --context "from file foo.py" --critics codex
-    python verify.py --claim "..." --critics codex --json      # machine-readable
+    python verify.py --claim "X does Y" --critics codex --check-evidence
+    python verify.py --claim "..." --critics codex --json       # machine-readable
 
 Each critic runs through dispatch.py (in parallel), so every check is metered in
 the ledger and honours your provider config. Critics default to enabled
@@ -23,10 +23,16 @@ providers marked `adversary = true` (or, for back-compat, whose role mentions
 "review"), always excluding the coordinator for independence; override
 with --critics.
 
-Exit codes (there is deliberately no 0 — agreement alone never certifies):
-    2  refuted / unsupported — DO NOT SHIP
+With --check-evidence, each critic's named EVIDENCE_SPEC (a file/url, or with
+--run-commands a shell command) is actually executed — that is the ONLY way to
+earn exit 0. Model agreement alone never does.
+
+Exit codes:
+    0  VERIFIED — all critics support AND named evidence check(s) passed
+       (only reachable with --check-evidence)
+    2  refuted / unsupported, OR a named evidence check FAILED — DO NOT SHIP
+    3  UNVERIFIED — all support but no evidence ran (consensus is not proof)
     4  verification did not run (every critic errored)
-    3  UNVERIFIED — all critics support it, but consensus is not proof
     1  inconclusive (partial errors, or mixed/uncertain verdicts)
 """
 from __future__ import annotations
@@ -40,12 +46,28 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+def _utf8_io():
+    """Idempotently make stdout/stderr UTF-8. Called from main() only — never at
+    import time, so importing this module doesn't mutate a caller's streams."""
+    for _name in ("stdout", "stderr"):
+        _s = getattr(sys, _name)
+        if getattr(_s, "_ai_orchestra_utf8", False) or not hasattr(_s, "buffer"):
+            continue
+        if (getattr(_s, "encoding", "") or "").lower().replace("-", "") == "utf8":
+            try:
+                _s._ai_orchestra_utf8 = True
+            except AttributeError:
+                pass
+            continue
+        _w = io.TextIOWrapper(_s.buffer, encoding="utf-8", errors="replace")
+        _w._ai_orchestra_utf8 = True
+        setattr(sys, _name, _w)
+
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 from config import load_providers  # noqa: E402
+from prove import check_cmd, check_file_contains, check_files, check_url  # noqa: E402
 
 DISPATCH = SCRIPTS / "dispatch.py"
 
@@ -64,7 +86,13 @@ Respond in EXACTLY this format and nothing else:
 
 VERDICT: SUPPORTED | REFUTED | UNSUPPORTED | UNCERTAIN
 CONFIDENCE: low | medium | high
-EVIDENCE_NEEDED: <the single concrete proof that would settle this>
+EVIDENCE_NEEDED: <the single concrete proof that would settle this, in prose>
+EVIDENCE_TYPE: cmd | file | url | none
+EVIDENCE_SPEC: <a machine-runnable form of that proof, matching EVIDENCE_TYPE:
+  cmd  -> a shell command that exits 0 if and only if the claim holds
+  file -> a path, or "path:LINE", or 'path contains "text"'
+  url  -> a URL, or 'url contains "text"'
+  none -> leave blank if no local check can settle this>
 FLAWS:
 - <specific problem, or "none found">
 
@@ -130,12 +158,65 @@ def parse_verdict(text: str) -> str:
     return "UNCERTAIN"
 
 
-def synthesize(verdicts: list) -> tuple:
-    """Pure decision function: verdict tokens -> (exit_code, label, message).
+EVIDENCE_TYPES = ("cmd", "file", "url", "none")
 
-    Deliberately never returns exit 0: this tool does not certify a claim on
-    model agreement alone. A caller that wants a hard pass must confirm the
-    EVIDENCE_NEEDED each critic named (or use a future evidence-check mode).
+
+def parse_evidence(text: str) -> tuple:
+    """Extract (etype, espec) from a critic reply, or (None, None) if there is
+    no machine-runnable evidence."""
+    etype = espec = None
+    for line in text.splitlines():
+        s = line.strip()
+        # tolerate markdown (**EVIDENCE_TYPE:**) — consume any non-alphanumeric
+        # run (colon, asterisks, spaces) between the label and the value.
+        mt = re.match(r"[^A-Za-z]*EVIDENCE_TYPE\b[^A-Za-z0-9]*(\w+)", s, re.I)
+        if mt:
+            t = mt.group(1).lower()
+            etype = t if t in EVIDENCE_TYPES else None
+        ms = re.match(r"[^A-Za-z]*EVIDENCE_SPEC\b\s*[:*]*\s*(.+)$", s, re.I)
+        if ms:
+            espec = ms.group(1).strip().strip("*`\"' \t").strip()
+    if etype in (None, "none") or not espec:
+        return None, None
+    return etype, espec
+
+
+def run_one_evidence(etype, espec, run_commands, timeout):
+    """Run one critic's named evidence via prove.py primitives.
+    Returns (ran: bool, ok: bool, detail: str). cmd-type evidence is skipped
+    unless run_commands is True (it executes model-suggested shell commands)."""
+    if etype == "cmd":
+        if not run_commands:
+            return False, True, "skipped (cmd evidence needs --run-commands)"
+        print(f"  [running evidence cmd] {espec}", file=sys.stderr, flush=True)
+        ok, detail = check_cmd(espec, timeout=timeout)
+        return True, ok, detail
+    if etype == "file":
+        mm = re.match(r'^(.+?)\s+contains\s+["\']?(.+?)["\']?$', espec, re.I)
+        if mm:
+            ok, detail = check_file_contains(mm.group(1).strip(), mm.group(2))
+            return True, ok, detail
+        path = espec.rsplit(":", 1)[0] if re.search(r":\d+$", espec) else espec
+        ok, detail = check_files([path.strip()])
+        return True, ok, detail
+    if etype == "url":
+        mm = re.match(r'^(\S+)\s+contains\s+["\']?(.+?)["\']?$', espec, re.I)
+        if mm:
+            ok, detail = check_url(mm.group(1), mm.group(2), timeout=timeout)
+        else:
+            ok, detail = check_url(espec.split()[0], timeout=timeout)
+        return True, ok, detail
+    return False, True, "no checkable evidence"
+
+
+def synthesize(verdicts: list, evidence_ran: bool = False,
+               evidence_ok: bool = True) -> tuple:
+    """Pure decision function: verdict tokens (+ evidence outcome) ->
+    (exit_code, label, message).
+
+    Exit 0 is reserved for a genuinely EARNED pass: all critics support it AND
+    at least one named evidence check actually ran and passed. Model agreement
+    alone never earns exit 0 — that is the whole point.
     """
     total = len(verdicts)
     errors = verdicts.count("ERROR")
@@ -147,6 +228,10 @@ def synthesize(verdicts: list) -> tuple:
         return 2, "DO_NOT_SHIP", (
             "a critic refuted the claim or found no supporting evidence. Fix the "
             "flaws or attach the evidence each critic named, then re-verify.")
+    if evidence_ran and not evidence_ok:
+        return 2, "DO_NOT_SHIP", (
+            "the named evidence check FAILED — the claim's own proof did not "
+            "hold. Do not ship; the claim is not grounded.")
     if errors == total:  # includes the empty-panel case
         return 4, "DID_NOT_RUN", (
             "verification did NOT run — every critic errored. This is NOT a pass. "
@@ -156,16 +241,21 @@ def synthesize(verdicts: list) -> tuple:
             f"{errors} of {total} critic(s) errored, so the panel is incomplete. "
             "Re-run with working critics.")
     if supported == total:
+        if evidence_ran and evidence_ok:
+            return 0, "VERIFIED", (
+                "all critics support it AND the named evidence check(s) passed. "
+                "This is a grounded pass — proof held, not just agreement.")
         return 3, "UNVERIFIED", (
-            "all critics support it, but consensus is not truth. This counts only "
-            "if the support is grounded in the EVIDENCE_NEEDED each critic named. "
-            "Go confirm that evidence yourself; do not treat agreement as a pass.")
+            "all critics support it, but consensus is not truth. Re-run with "
+            "--check-evidence so the named proof is actually executed, or confirm "
+            "that evidence yourself. Agreement alone is not a pass.")
     return 1, "INCONCLUSIVE", (
         "mixed/uncertain verdicts. Provide the evidence the critics asked for and "
         "re-run, or narrow the claim.")
 
 
 def main():
+    _utf8_io()
     ap = argparse.ArgumentParser(
         description="Adversarially cross-check a claim across providers.",
     )
@@ -174,6 +264,12 @@ def main():
     ap.add_argument("--critics", default="",
                     help="comma-separated provider names (default: adversary=true)")
     ap.add_argument("--timeout", type=int, default=180)
+    ap.add_argument("--check-evidence", action="store_true",
+                    help="run the file/url evidence each critic names — the only "
+                         "way to earn exit 0 (a grounded pass)")
+    ap.add_argument("--run-commands", action="store_true",
+                    help="also run cmd-type evidence; executes model-suggested "
+                         "shell commands, so use only when you trust the critics")
     ap.add_argument("--json", action="store_true",
                     help="emit a machine-readable JSON report instead of prose")
     args = ap.parse_args()
@@ -222,7 +318,26 @@ def main():
             print(text if ok else f"  (failed: {text})")
             print()
 
-    code, label, message = synthesize(verdicts)
+    # ── optional evidence loop: run the proof each critic named ──────────
+    evidence_ran, evidence_ok, evidence_results = False, True, []
+    if args.check_evidence:
+        seen = set()
+        for d in details:
+            if not d["ok"]:
+                continue
+            etype, espec = parse_evidence(d["output"])
+            if not etype or (etype, espec) in seen:
+                continue
+            seen.add((etype, espec))
+            ran, ok, detail = run_one_evidence(
+                etype, espec, args.run_commands, args.timeout)
+            evidence_ran = evidence_ran or ran
+            evidence_ok = evidence_ok and (ok if ran else True)
+            evidence_results.append({"critic": d["critic"], "type": etype,
+                                     "spec": espec, "ran": ran, "ok": ok,
+                                     "detail": detail})
+
+    code, label, message = synthesize(verdicts, evidence_ran, evidence_ok)
     tally = {v.lower(): verdicts.count(v) for v in
              ("SUPPORTED", "REFUTED", "UNSUPPORTED", "UNCERTAIN", "ERROR")}
 
@@ -233,6 +348,8 @@ def main():
             "tally": tally,
             "critics": [{"critic": d["critic"], "verdict": d["verdict"],
                          "ok": d["ok"]} for d in details],
+            "evidence_checked": evidence_ran,
+            "evidence": evidence_results,
             "message": message,
         }, ensure_ascii=False, indent=2))
     else:
@@ -240,6 +357,12 @@ def main():
         print(f"Tally: {tally['supported']} supported · {tally['refuted']} refuted "
               f"· {tally['unsupported']} unsupported · {tally['uncertain']} "
               f"uncertain · {tally['error']} error")
+        if evidence_results:
+            print("Evidence checks:")
+            for e in evidence_results:
+                mark = "PASS" if e["ran"] and e["ok"] else (
+                    "FAIL" if e["ran"] else "SKIP")
+                print(f"  [{mark}] ({e['type']}) {e['spec']} — {e['detail']}")
         print(f"RESULT (exit {code}): {message}")
     sys.exit(code)
 

@@ -31,8 +31,23 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+def _utf8_io():
+    """Idempotently make stdout/stderr UTF-8. Called from main() only — never at
+    import time, so importing this module doesn't mutate a caller's streams."""
+    for _name in ("stdout", "stderr"):
+        _s = getattr(sys, _name)
+        if getattr(_s, "_ai_orchestra_utf8", False) or not hasattr(_s, "buffer"):
+            continue
+        if (getattr(_s, "encoding", "") or "").lower().replace("-", "") == "utf8":
+            try:
+                _s._ai_orchestra_utf8 = True
+            except AttributeError:
+                pass
+            continue
+        _w = io.TextIOWrapper(_s.buffer, encoding="utf-8", errors="replace")
+        _w._ai_orchestra_utf8 = True
+        setattr(sys, _name, _w)
+
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
@@ -143,6 +158,7 @@ def log_proof(kind, ok, detail, label=""):
 
 
 def main():
+    _utf8_io()
     ap = argparse.ArgumentParser(description="Proof-of-work / replay gate.")
     ap.add_argument("--cmd", help="a command to run")
     ap.add_argument("--expect-rc", type=int, default=0, help="expected exit code")

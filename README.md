@@ -101,12 +101,22 @@ Tally: 0 supported · 2 refuted · 0 unsupported · 0 uncertain · 0 error
 RESULT (exit 2): DO NOT SHIP AS-IS — a critic refuted the claim...
 ```
 
-退出碼替判定背書 —— 而且刻意**沒有 exit 0**：即使是一致支持，也會回一個非零的
-「UNVERIFIED — consensus is not proof」碼，因為模型之間的一致是一個假設，
-不是一次驗證。
+退出碼替判定背書。單靠模型一致**永遠拿不到 exit 0**——即使全數支持，也只回
+非零的「UNVERIFIED — 共識不是證據」碼，因為模型彼此同意只是假設，不是驗證。
 
-> 若沒有給 `--critics`，verify.py 會挑選那些已啟用、且 `role` 含有「review」
-> 的供應商（排除總指揮）。如果你精簡過設定，請明確傳入 `--critics a,b`，
+**exit 0 要用證據掙**：加上 `--check-evidence`，verify.py 會實際去跑每個對手
+指名的 `EVIDENCE_SPEC`（檔案／URL；加 `--run-commands` 才會執行指令），
+**只有那個證據檢查真的通過**才回 exit 0（VERIFIED），否則證據沒過就回 exit 2。
+底層用 [`prove.py`](scripts/prove.py)（回放／工作證明閘門），也可獨立使用：
+
+```bash
+python scripts/prove.py --cmd "pytest -q" --expect-rc 0   # 跑測試當證明
+python scripts/prove.py --files src/a.py src/b.py         # 檔案存在且非空
+```
+
+> 若沒有給 `--critics`，verify.py 會挑選那些已啟用、標了 `adversary = true`
+> 的供應商（沒有的話退回 `role` 含「review」的），一律排除總指揮。精簡過設定就
+> 明確傳 `--critics a,b`，
 > 或在某個供應商的 role 加上「review」。
 
 ### 看看你花了多少

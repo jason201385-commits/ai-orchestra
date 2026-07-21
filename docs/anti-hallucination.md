@@ -68,9 +68,11 @@
 ## 什麼*不能*降低幻覺
 
 - **加更多會彼此附和的模型。** 帶著同一個盲點的冗餘聲音，只會在不增加任何證據的情況下
-  灌水信心。`verify.py` 明確拒絕把「全體同意但無來源」當成查證通過——
-  即使全數支持，回傳的也是一個非零的「UNVERIFIED — consensus is not proof」退出碼，
-  絕不會是通過，這樣腳本就不會把「同意」誤當成綠燈。
+  灌水信心。`verify.py` 明確拒絕把「全體同意但無來源」當成查證通過——單靠模型一致
+  只會回非零的「UNVERIFIED — 共識不是證據」碼，永遠拿不到 exit 0。
+  **exit 0 只能用證據掙**：加 `--check-evidence` 時，工具會實際去跑每個對手指名的
+  證據（檔案／URL／指令，底層走 `prove.py`），只有那個檢查真的通過才算通過。
+  「同意」不是綠燈，「證明成立」才是。
 - **更多輪的辯論。** 超過大約 1～2 輪聚焦的來回之後，你通常只是在付 token 重打同一份脈絡的官司，
   而不是在找新的反證。
 - **過度指揮（over-orchestration）。** 正如 **harry58892** 所說：
@@ -104,6 +106,8 @@
 |---|---|
 | 遵守你 repo 的 `AGENTS.md`、獨立且唯讀的審查者 | `dispatch.py <claude> --claude-profile review` |
 | 帶證據要求的單一對手交叉查核，並給出誠實的「共識不等於真相」判定 | `verify.py --critics <provider>` |
+| **實際去跑對手指名的證據**，只有證明成立才回 exit 0 | `verify.py --check-evidence` |
+| **回放／工作證明閘門**：跑測試、查檔案、打 URL，證明成立才過 | `prove.py --cmd/--files/--url` |
 | 把苦力活路由到便宜／大量的供應商，省下你稀缺的總指揮預算 | `dispatch.py <openai-compatible provider>` |
 | 看看多做的那層查證值不值得那筆花費 | `usage_report.py` |
 
