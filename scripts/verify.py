@@ -254,6 +254,106 @@ def synthesize(verdicts: list, evidence_ran: bool = False,
         "re-run, or narrow the claim.")
 
 
+def verify_claim(claim, context, critics, timeout,
+                 check_evidence=False, run_commands=False):
+    """Run the adversarial panel (in parallel) on one claim and return a dict:
+    {verdicts, details, evidence, code, label, message, tally}. Reused by both
+    single-claim mode and --from-answer atomic-claim mode."""
+    ctx = f"\n--- CONTEXT / SOURCE ---\n{context}" if context else ""
+    prompt = CRITIC_PROMPT.format(claim=claim, context=ctx)
+
+    def work(name):
+        ok, text = run_critic(name, prompt, timeout)
+        return name, ok, text
+
+    with ThreadPoolExecutor(max_workers=min(8, len(critics))) as pool:
+        results = list(pool.map(work, critics))
+
+    details, verdicts = [], []
+    for name, ok, text in results:
+        verdict = parse_verdict(text) if ok else "ERROR"
+        verdicts.append(verdict)
+        details.append({"critic": name, "verdict": verdict, "ok": ok,
+                        "output": text})
+
+    evidence_ran, evidence_ok, evidence_results = False, True, []
+    if check_evidence:
+        seen = set()
+        for d in details:
+            if not d["ok"]:
+                continue
+            etype, espec = parse_evidence(d["output"])
+            if not etype or (etype, espec) in seen:
+                continue
+            seen.add((etype, espec))
+            ran, ok, detail = run_one_evidence(etype, espec, run_commands, timeout)
+            evidence_ran = evidence_ran or ran
+            evidence_ok = evidence_ok and (ok if ran else True)
+            evidence_results.append({"critic": d["critic"], "type": etype,
+                                     "spec": espec, "ran": ran, "ok": ok,
+                                     "detail": detail})
+
+    code, label, message = synthesize(verdicts, evidence_ran, evidence_ok)
+    tally = {v.lower(): verdicts.count(v) for v in
+             ("SUPPORTED", "REFUTED", "UNSUPPORTED", "UNCERTAIN", "ERROR")}
+    return {"verdicts": verdicts, "details": details, "evidence": evidence_results,
+            "code": code, "label": label, "message": message, "tally": tally}
+
+
+SPLIT_PROMPT = """\
+Extract the atomic, independently-checkable FACTUAL claims from the text below.
+- One claim per array element, each self-contained (resolve pronouns/references).
+- Skip opinions, recommendations, questions, and instructions.
+- Prefer numeric / API / file / behavioral assertions that could be proven false.
+- At most {max_claims} claims.
+Output ONLY a JSON array of strings, nothing else.
+
+--- TEXT ---
+{text}
+"""
+
+
+def extract_claims_json(text, max_claims=12):
+    """Pull a JSON array of claim strings out of a splitter's reply (tolerant of
+    surrounding prose/markdown fences)."""
+    m = re.search(r"\[.*\]", text, re.S)
+    if not m:
+        return []
+    try:
+        arr = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(arr, list):
+        return []
+    out = [str(c).strip() for c in arr if isinstance(c, str) and str(c).strip()]
+    return out[:max_claims]
+
+
+def split_claims(answer, splitter, timeout, max_claims=12):
+    ok, text = run_critic(
+        splitter, SPLIT_PROMPT.format(max_claims=max_claims, text=answer), timeout)
+    if not ok:
+        return []
+    return extract_claims_json(text, max_claims)
+
+
+def aggregate_from_answer(codes):
+    """Overall exit code across per-claim results. Any DO_NOT_SHIP (2) dominates;
+    an all-VERIFIED set is a pass; otherwise the softest honest signal wins."""
+    codes = list(codes)
+    if not codes:
+        return 4
+    if 2 in codes:
+        return 2
+    if all(c == 0 for c in codes):
+        return 0
+    if 4 in codes:
+        return 4
+    if all(c == 3 for c in codes):
+        return 3
+    return 1
+
+
 def main():
     _utf8_io()
     ap = argparse.ArgumentParser(
@@ -270,13 +370,20 @@ def main():
     ap.add_argument("--run-commands", action="store_true",
                     help="also run cmd-type evidence; executes model-suggested "
                          "shell commands, so use only when you trust the critics")
+    ap.add_argument("--from-answer", action="store_true",
+                    help="treat stdin as a long answer: split it into atomic "
+                         "claims (via --splitter) and verify each")
+    ap.add_argument("--splitter", default="",
+                    help="provider that splits an answer into atomic claims "
+                         "(--from-answer; default: the first critic)")
+    ap.add_argument("--max-claims", type=int, default=12)
     ap.add_argument("--json", action="store_true",
                     help="emit a machine-readable JSON report instead of prose")
     args = ap.parse_args()
 
-    claim = args.claim.strip() or sys.stdin.read().strip()
-    if not claim:
-        ap.error("provide a claim via --claim or stdin")
+    text_in = args.claim.strip() or sys.stdin.read().strip()
+    if not text_in:
+        ap.error("provide a claim/answer via --claim or stdin")
 
     providers = load_providers()
     if args.critics:
@@ -291,80 +398,82 @@ def main():
         ap.error("no critics selected. Pass --critics name1,name2, mark a provider "
                  "`adversary = true`, or give one a role containing 'review'.")
 
-    ctx = f"\n--- CONTEXT / SOURCE ---\n{args.context}" if args.context else ""
-    prompt = CRITIC_PROMPT.format(claim=claim, context=ctx)
+    # ── --from-answer: split into atomic claims, verify each ─────────────
+    if args.from_answer:
+        splitter = args.splitter or critics[0]
+        if splitter not in providers:
+            ap.error(f"unknown splitter '{splitter}'. Configured: "
+                     f"{', '.join(sorted(providers))}")
+        claims = split_claims(text_in, splitter, args.timeout, args.max_claims)
+        if not claims:
+            print(f"[from-answer] splitter '{splitter}' returned no atomic claims "
+                  "— nothing to verify (or the split call failed).", file=sys.stderr)
+            sys.exit(4)
+        if not args.json:
+            print(f"Split into {len(claims)} atomic claim(s) via '{splitter}'; "
+                  f"verifying each across {len(critics)} critic(s)...\n")
+        per = []
+        for i, c in enumerate(claims, 1):
+            r = verify_claim(c, "", critics, args.timeout,
+                             args.check_evidence, args.run_commands)
+            per.append({"claim": c, **r})
+            if not args.json:
+                print(f"[{i}/{len(claims)}] ({r['label']}) {c}")
+        overall = aggregate_from_answer([p["code"] for p in per])
+        if args.json:
+            print(json.dumps({
+                "mode": "from-answer", "splitter": splitter,
+                "overall_exit_code": overall,
+                "claims": [{"claim": p["claim"], "result": p["label"],
+                            "exit_code": p["code"], "tally": p["tally"]}
+                           for p in per],
+            }, ensure_ascii=False, indent=2))
+        else:
+            failing = [p for p in per if p["code"] == 2]
+            if failing:
+                print("\n── claims to fix first ──")
+                for p in failing:
+                    print(f"  [DO_NOT_SHIP] {p['claim']}")
+            print(f"\nOVERALL (exit {overall}): "
+                  f"{ {0:'VERIFIED',2:'DO_NOT_SHIP',3:'UNVERIFIED',4:'DID_NOT_RUN',1:'INCONCLUSIVE'}[overall] } "
+                  f"over {len(claims)} claim(s)")
+        sys.exit(overall)
 
+    # ── single-claim mode ────────────────────────────────────────────────
     if not args.json:
         print(f"Verifying across {len(critics)} critic(s) in parallel: "
               f"{', '.join(critics)}\n")
-
-    # Run critics concurrently; dispatch.py's own lock serializes any that share
-    # one CLI login (e.g. two claude critics), so parallelism is safe.
-    def work(name):
-        ok, text = run_critic(name, prompt, args.timeout)
-        return name, ok, text
-
-    with ThreadPoolExecutor(max_workers=min(8, len(critics))) as pool:
-        results = list(pool.map(work, critics))
-
-    details, verdicts = [], []
-    for name, ok, text in results:
-        verdict = parse_verdict(text) if ok else "ERROR"
-        verdicts.append(verdict)
-        details.append({"critic": name, "verdict": verdict, "ok": ok,
-                        "output": text})
-        if not args.json:
-            print(f"══ {name} → {verdict} " + "═" * max(0, 40 - len(name)))
-            print(text if ok else f"  (failed: {text})")
+    r = verify_claim(text_in, args.context, critics, args.timeout,
+                     args.check_evidence, args.run_commands)
+    if not args.json:
+        for d in r["details"]:
+            print(f"══ {d['critic']} → {d['verdict']} "
+                  + "═" * max(0, 40 - len(d['critic'])))
+            print(d["output"] if d["ok"] else f"  (failed: {d['output']})")
             print()
 
-    # ── optional evidence loop: run the proof each critic named ──────────
-    evidence_ran, evidence_ok, evidence_results = False, True, []
-    if args.check_evidence:
-        seen = set()
-        for d in details:
-            if not d["ok"]:
-                continue
-            etype, espec = parse_evidence(d["output"])
-            if not etype or (etype, espec) in seen:
-                continue
-            seen.add((etype, espec))
-            ran, ok, detail = run_one_evidence(
-                etype, espec, args.run_commands, args.timeout)
-            evidence_ran = evidence_ran or ran
-            evidence_ok = evidence_ok and (ok if ran else True)
-            evidence_results.append({"critic": d["critic"], "type": etype,
-                                     "spec": espec, "ran": ran, "ok": ok,
-                                     "detail": detail})
-
-    code, label, message = synthesize(verdicts, evidence_ran, evidence_ok)
-    tally = {v.lower(): verdicts.count(v) for v in
-             ("SUPPORTED", "REFUTED", "UNSUPPORTED", "UNCERTAIN", "ERROR")}
-
+    tally = r["tally"]
     if args.json:
         print(json.dumps({
-            "result": label,
-            "exit_code": code,
-            "tally": tally,
+            "result": r["label"], "exit_code": r["code"], "tally": tally,
             "critics": [{"critic": d["critic"], "verdict": d["verdict"],
-                         "ok": d["ok"]} for d in details],
-            "evidence_checked": evidence_ran,
-            "evidence": evidence_results,
-            "message": message,
+                         "ok": d["ok"]} for d in r["details"]],
+            "evidence_checked": bool(r["evidence"]),
+            "evidence": r["evidence"], "message": r["message"],
         }, ensure_ascii=False, indent=2))
     else:
         print("─" * 60)
         print(f"Tally: {tally['supported']} supported · {tally['refuted']} refuted "
               f"· {tally['unsupported']} unsupported · {tally['uncertain']} "
               f"uncertain · {tally['error']} error")
-        if evidence_results:
+        if r["evidence"]:
             print("Evidence checks:")
-            for e in evidence_results:
+            for e in r["evidence"]:
                 mark = "PASS" if e["ran"] and e["ok"] else (
                     "FAIL" if e["ran"] else "SKIP")
                 print(f"  [{mark}] ({e['type']}) {e['spec']} — {e['detail']}")
-        print(f"RESULT (exit {code}): {message}")
-    sys.exit(code)
+        print(f"RESULT (exit {r['code']}): {r['message']}")
+    sys.exit(r["code"])
 
 
 if __name__ == "__main__":

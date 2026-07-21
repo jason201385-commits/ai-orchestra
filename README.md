@@ -114,6 +114,13 @@ python scripts/prove.py --cmd "pytest -q" --expect-rc 0   # 跑測試當證明
 python scripts/prove.py --files src/a.py src/b.py         # 檔案存在且非空
 ```
 
+真實情況通常不是查一句話，而是查 agent 剛寫的**一整段**。用 `--from-answer`
+先把長答案拆成原子宣稱，逐條查核，任何一條被駁斥就整體 DO_NOT_SHIP：
+
+```bash
+cat answer.md | python scripts/verify.py --from-answer --splitter codex --critics grok
+```
+
 > 若沒有給 `--critics`，verify.py 會挑選那些已啟用、標了 `adversary = true`
 > 的供應商（沒有的話退回 `role` 含「review」的），一律排除總指揮。精簡過設定就
 > 明確傳 `--critics a,b`，

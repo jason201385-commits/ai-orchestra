@@ -14,6 +14,9 @@
 - **`verify.py --check-evidence`** — 實際去跑每個對手指名的 `EVIDENCE_SPEC`
   （檔案／URL；加 `--run-commands` 才執行指令）。**這是唯一能掙到 exit 0 的路**：
   全數支持 ＋ 證據檢查通過才回 0（VERIFIED）；證據沒過回 2。單靠共識永遠不是 0。
+- **`verify.py --from-answer`** — 把一整段長答案（研究／設計／bug 分析）用
+  `--splitter` 拆成原子事實宣稱，逐條對抗式查核再彙總；任一條被駁斥即整體
+  DO_NOT_SHIP，並把該修的宣稱列最前面。真實用途是查 agent 剛寫的整段，不是一句話。
 - `dispatch.py --doctor` — 離線檢查每個已啟用供應商是否就緒（CLI 在 PATH、
   API key 是否設定、base_url 是否安全），解決冷啟動最大的卡點。
 - 供應商設定新增 `adversary = true` 旗標，明確指定 `verify.py` 的預設對手，

@@ -47,6 +47,9 @@ python scripts/dispatch.py --doctor
 # (earns exit 0); --json for agents:
 echo "CLAIM" | python scripts/verify.py --critics <a,b> [--check-evidence] [--json]
 
+# Verify a whole answer: split into atomic claims, check each:
+cat answer.md | python scripts/verify.py --from-answer --splitter <p> --critics <a,b>
+
 # Proof-of-work / replay gate — prove a claim with a LOCAL check, not an opinion:
 python scripts/prove.py --cmd "pytest -q" --expect-rc 0    # or --files / --url
 

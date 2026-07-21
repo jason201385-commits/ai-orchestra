@@ -154,6 +154,27 @@ class RunEvidenceTests(unittest.TestCase):
                 (True, False))
 
 
+class FromAnswerTests(unittest.TestCase):
+    def test_extract_claims_json(self):
+        self.assertEqual(verify.extract_claims_json('["a","b","c"]'),
+                         ["a", "b", "c"])
+        self.assertEqual(verify.extract_claims_json('prose\n["x", "y"]\nmore'),
+                         ["x", "y"])
+        self.assertEqual(verify.extract_claims_json("no json here"), [])
+        self.assertEqual(verify.extract_claims_json('["a", 3, "b", ""]'),
+                         ["a", "b"])  # non-strings & blanks dropped
+        self.assertEqual(verify.extract_claims_json('["a","b","c"]', max_claims=2),
+                         ["a", "b"])
+
+    def test_aggregate(self):
+        self.assertEqual(verify.aggregate_from_answer([0, 0, 0]), 0)
+        self.assertEqual(verify.aggregate_from_answer([2, 0, 3]), 2)   # any fail
+        self.assertEqual(verify.aggregate_from_answer([3, 3]), 3)
+        self.assertEqual(verify.aggregate_from_answer([4, 0]), 4)
+        self.assertEqual(verify.aggregate_from_answer([0, 3]), 1)      # mixed
+        self.assertEqual(verify.aggregate_from_answer([]), 4)
+
+
 class DefaultCriticsTests(unittest.TestCase):
     def test_prefers_explicit_adversary_flag(self):
         provs = {
