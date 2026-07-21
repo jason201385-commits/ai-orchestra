@@ -1,0 +1,30 @@
+# ── secrets: never commit ──────────────────────────────────────────
+.env
+.env.*
+*.key
+*.pem
+
+# ── your personal provider config (keys live in env, but this is still
+#    your private setup — only the example is tracked) ───────────────
+config/providers.toml
+
+# ── runtime data: ledgers, quota caches, dashboards, locks ──────────
+data/*
+!data/.gitkeep
+!data/README.md
+
+# ── python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── editors / OS ────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

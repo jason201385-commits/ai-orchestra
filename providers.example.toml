@@ -1,0 +1,156 @@
+# ─────────────────────────────────────────────────────────────────────────
+#  ai-orchestra — declare the AI subscriptions you actually have.
+#
+#  Copy this file to  config/providers.toml  and keep only the blocks you use:
+#      cp providers.example.toml config/providers.toml
+#
+#  Two provider types cover essentially every paid AI plan on the market:
+#
+#    type = "cli"     A command-line tool you're already logged into.
+#                     kind = claude | codex | grok | gemini  → purpose-built
+#                     kind = generic                         → any other CLI
+#
+#    type = "openai"  Any OpenAI-compatible /chat/completions HTTP endpoint.
+#                     One adapter, ~every hosted API + every local server.
+#
+#  Nothing here contains secrets. API keys are read from environment
+#  variables named by `api_key_env` — never write a key into this file.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+# ===== CLI subscriptions (already-logged-in command-line tools) ===========
+
+# Claude Code — the recommended coordinator/reviewer. Purpose-built adapter:
+# streaming JSON, read-only "review" profile, plan-mode, budget controls.
+[providers.claude]
+type    = "cli"
+kind    = "claude"
+command = "claude"
+role    = "coordinator, reviewer, fact-check"
+
+# OpenAI Codex CLI (ChatGPT subscription).
+[providers.codex]
+type    = "cli"
+kind    = "codex"
+command = "codex"
+role    = "independent reviewer, design"
+
+# xAI Grok CLI (grok.com subscription).
+[providers.grok]
+type    = "cli"
+kind    = "grok"
+command = "grok"
+role    = "web-culture, copy, second opinion"
+enabled = false   # flip to true once you've installed & logged into the CLI
+
+# Google Gemini CLI.
+[providers.gemini]
+type    = "cli"
+kind    = "gemini"
+command = "gemini"
+role    = "second opinion"
+enabled = false
+
+# Any OTHER command-line agent you like — the generic CLI adapter.
+# {prompt} is substituted with your prompt. If you omit {prompt} and set
+# stdin = true, the prompt is piped to the tool's standard input instead.
+[providers.mycli]
+type    = "cli"
+kind    = "generic"
+command = "your-cli"
+args    = ["--print", "{prompt}"]
+stdin   = false
+enabled = false
+
+
+# ===== OpenAI-compatible HTTP APIs (one adapter fits all) ==================
+# For each, set the environment variable named in api_key_env before use,
+# e.g.  export OPENAI_API_KEY=sk-...    (PowerShell: $env:OPENAI_API_KEY="sk-...")
+
+# NOTE: OpenAI's GPT-5-class / reasoning models on this endpoint expect the token
+# cap under "max_completion_tokens" (plain "max_tokens" is rejected). Hence the
+# max_tokens_param below. Set max_tokens = 0 to omit the cap entirely.
+[providers.openai]
+type             = "openai"
+base_url         = "https://api.openai.com/v1"
+api_key_env      = "OPENAI_API_KEY"
+model            = "gpt-5.6"
+max_tokens_param = "max_completion_tokens"
+role             = "reviewer, generalist"
+enabled          = false
+
+# Anthropic's OpenAI-compatible endpoint (use your Anthropic API key).
+[providers.anthropic_api]
+type        = "openai"
+base_url    = "https://api.anthropic.com/v1"
+api_key_env = "ANTHROPIC_API_KEY"
+model       = "claude-sonnet-5"
+enabled     = false
+
+[providers.deepseek]
+type        = "openai"
+base_url    = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+model       = "deepseek-chat"
+role        = "cheap batch, long context"
+enabled     = false
+
+# Groq — very fast inference of open models.
+[providers.groq]
+type        = "openai"
+base_url    = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+model       = "llama-3.3-70b-versatile"
+enabled     = false
+
+# xAI Grok via API (alternative to the CLI above).
+[providers.xai]
+type        = "openai"
+base_url    = "https://api.x.ai/v1"
+api_key_env = "XAI_API_KEY"
+model       = "grok-4"
+enabled     = false
+
+[providers.mistral]
+type        = "openai"
+base_url    = "https://api.mistral.ai/v1"
+api_key_env = "MISTRAL_API_KEY"
+model       = "mistral-large-latest"
+enabled     = false
+
+# OpenRouter — one key, hundreds of models. Great for adding many "voices".
+[providers.openrouter]
+type        = "openai"
+base_url    = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+model       = "anthropic/claude-sonnet-5"
+enabled     = false
+
+# NVIDIA NIM — a generous free tier for batch/bulk work.
+[providers.nim]
+type        = "openai"
+base_url    = "https://integrate.api.nvidia.com/v1"
+api_key_env = "NVIDIA_API_KEY"
+model       = "meta/llama-3.3-70b-instruct"
+role        = "bulk drafts, translation, summarization"
+enabled     = false
+
+# ── Local, no key required ────────────────────────────────────────────────
+# Ollama (http://localhost:11434) — set api_key_env = "" for keyless local.
+# FIRST run `ollama pull <model>`, then set `model` to a tag you actually have
+# (check `ollama list`), or the first call returns an opaque model-not-found.
+[providers.ollama]
+type        = "openai"
+base_url    = "http://localhost:11434/v1"
+api_key_env = ""
+model       = "llama3.3"
+role        = "local, private, free"
+enabled     = false
+
+# LM Studio local server.
+[providers.lmstudio]
+type        = "openai"
+base_url    = "http://localhost:1234/v1"
+api_key_env = ""
+model       = "local-model"
+enabled     = false
