@@ -74,6 +74,9 @@ def _normalize(name: str, raw: dict) -> dict:
         # A non-positive timeout would crash the dispatcher — fall back to 300.
         "default_timeout": dt if dt > 0 else 300,
         "model": raw.get("model") or None,
+        # Explicit opt-in as a verify.py adversary/critic (preferred over the
+        # legacy role~="review" heuristic).
+        "adversary": bool(raw.get("adversary", False)),
     }
     if ptype == "cli":
         kind = str(raw.get("kind", "generic")).lower()

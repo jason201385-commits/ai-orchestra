@@ -15,10 +15,12 @@ what actually reduces hallucination (see docs/anti-hallucination.md):
 Usage:
     echo "the claim / answer to check" | python verify.py --critics codex,deepseek
     python verify.py --claim "X does Y" --context "from file foo.py" --critics codex
+    python verify.py --claim "..." --critics codex --json      # machine-readable
 
-Each critic runs through dispatch.py, so every check is metered in the ledger
-and honours your provider config. Critics default to enabled providers whose
-role mentions "review" (excluding the coordinator, for independence); override
+Each critic runs through dispatch.py (in parallel), so every check is metered in
+the ledger and honours your provider config. Critics default to enabled
+providers marked `adversary = true` (or, for back-compat, whose role mentions
+"review"), always excluding the coordinator for independence; override
 with --critics.
 
 Exit codes (there is deliberately no 0 — agreement alone never certifies):
@@ -31,9 +33,11 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -71,15 +75,22 @@ FLAWS:
 
 
 def default_critics(providers: dict) -> list:
-    """Enabled providers whose role invites review — but never the coordinator.
-    An adversary that is the same model producing the claim isn't independent."""
-    picks = [
-        n for n, s in providers.items()
-        if s.get("enabled", True)
-        and "review" in (s.get("role") or "").lower()
+    """Pick independent adversaries. Prefer providers explicitly marked
+    `adversary = true`; fall back to the old role~="review" heuristic only if
+    none are marked. The coordinator is never a default critic — an adversary
+    that is the same model producing the claim isn't independent."""
+    enabled = {n: s for n, s in providers.items() if s.get("enabled", True)}
+    explicit = sorted(
+        n for n, s in enabled.items()
+        if s.get("adversary") and "coordinator" not in (s.get("role") or "").lower()
+    )
+    if explicit:
+        return explicit
+    return sorted(
+        n for n, s in enabled.items()
+        if "review" in (s.get("role") or "").lower()
         and "coordinator" not in (s.get("role") or "").lower()
-    ]
-    return picks
+    )
 
 
 def run_critic(name: str, prompt: str, timeout: int) -> tuple:
@@ -119,6 +130,41 @@ def parse_verdict(text: str) -> str:
     return "UNCERTAIN"
 
 
+def synthesize(verdicts: list) -> tuple:
+    """Pure decision function: verdict tokens -> (exit_code, label, message).
+
+    Deliberately never returns exit 0: this tool does not certify a claim on
+    model agreement alone. A caller that wants a hard pass must confirm the
+    EVIDENCE_NEEDED each critic named (or use a future evidence-check mode).
+    """
+    total = len(verdicts)
+    errors = verdicts.count("ERROR")
+    refuted = verdicts.count("REFUTED")
+    unsupported = verdicts.count("UNSUPPORTED")
+    supported = verdicts.count("SUPPORTED")
+
+    if refuted or unsupported:
+        return 2, "DO_NOT_SHIP", (
+            "a critic refuted the claim or found no supporting evidence. Fix the "
+            "flaws or attach the evidence each critic named, then re-verify.")
+    if errors == total:  # includes the empty-panel case
+        return 4, "DID_NOT_RUN", (
+            "verification did NOT run — every critic errored. This is NOT a pass. "
+            "Fix critic auth/availability and re-run.")
+    if errors:
+        return 1, "INCONCLUSIVE", (
+            f"{errors} of {total} critic(s) errored, so the panel is incomplete. "
+            "Re-run with working critics.")
+    if supported == total:
+        return 3, "UNVERIFIED", (
+            "all critics support it, but consensus is not truth. This counts only "
+            "if the support is grounded in the EVIDENCE_NEEDED each critic named. "
+            "Go confirm that evidence yourself; do not treat agreement as a pass.")
+    return 1, "INCONCLUSIVE", (
+        "mixed/uncertain verdicts. Provide the evidence the critics asked for and "
+        "re-run, or narrow the claim.")
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Adversarially cross-check a claim across providers.",
@@ -126,8 +172,10 @@ def main():
     ap.add_argument("--claim", default="", help="the claim (else read from stdin)")
     ap.add_argument("--context", default="", help="optional grounding context/source")
     ap.add_argument("--critics", default="",
-                    help="comma-separated provider names (default: role~=review)")
+                    help="comma-separated provider names (default: adversary=true)")
     ap.add_argument("--timeout", type=int, default=180)
+    ap.add_argument("--json", action="store_true",
+                    help="emit a machine-readable JSON report instead of prose")
     args = ap.parse_args()
 
     claim = args.claim.strip() or sys.stdin.read().strip()
@@ -144,62 +192,56 @@ def main():
         ap.error(f"unknown critic(s): {', '.join(unknown)}. "
                  f"Configured: {', '.join(sorted(providers))}")
     if not critics:
-        ap.error("no critics selected. Pass --critics name1,name2, or give a "
-                 "provider a role containing 'review' in providers.toml.")
+        ap.error("no critics selected. Pass --critics name1,name2, mark a provider "
+                 "`adversary = true`, or give one a role containing 'review'.")
 
     ctx = f"\n--- CONTEXT / SOURCE ---\n{args.context}" if args.context else ""
     prompt = CRITIC_PROMPT.format(claim=claim, context=ctx)
 
-    print(f"Verifying across {len(critics)} critic(s): {', '.join(critics)}\n")
-    verdicts = []
-    for name in critics:
+    if not args.json:
+        print(f"Verifying across {len(critics)} critic(s) in parallel: "
+              f"{', '.join(critics)}\n")
+
+    # Run critics concurrently; dispatch.py's own lock serializes any that share
+    # one CLI login (e.g. two claude critics), so parallelism is safe.
+    def work(name):
         ok, text = run_critic(name, prompt, args.timeout)
+        return name, ok, text
+
+    with ThreadPoolExecutor(max_workers=min(8, len(critics))) as pool:
+        results = list(pool.map(work, critics))
+
+    details, verdicts = [], []
+    for name, ok, text in results:
         verdict = parse_verdict(text) if ok else "ERROR"
         verdicts.append(verdict)
-        print(f"══ {name} → {verdict} " + "═" * max(0, 40 - len(name)))
-        print(text if ok else f"  (failed: {text})")
-        print()
+        details.append({"critic": name, "verdict": verdict, "ok": ok,
+                        "output": text})
+        if not args.json:
+            print(f"══ {name} → {verdict} " + "═" * max(0, 40 - len(name)))
+            print(text if ok else f"  (failed: {text})")
+            print()
 
-    # ── synthesis: agreement is NOT proof ────────────────────────────────
-    # Exit codes let scripts act on the outcome:
-    #   2 = refuted / unsupported            (DO NOT SHIP)
-    #   4 = verification did not run         (every critic errored)
-    #   3 = UNVERIFIED — consensus only      (all supported, but that's not proof)
-    #   1 = inconclusive                     (partial errors, or mixed/uncertain)
-    # There is deliberately NO exit 0: this tool never certifies a claim on model
-    # agreement alone — confirming the named evidence is a human step.
-    total = len(verdicts)
-    errors = verdicts.count("ERROR")
-    refuted = verdicts.count("REFUTED")
-    unsupported = verdicts.count("UNSUPPORTED")
-    supported = verdicts.count("SUPPORTED")
-    uncertain = verdicts.count("UNCERTAIN")
-    print("─" * 60)
-    print(f"Tally: {supported} supported · {refuted} refuted · "
-          f"{unsupported} unsupported · {uncertain} uncertain · {errors} error")
+    code, label, message = synthesize(verdicts)
+    tally = {v.lower(): verdicts.count(v) for v in
+             ("SUPPORTED", "REFUTED", "UNSUPPORTED", "UNCERTAIN", "ERROR")}
 
-    if refuted or unsupported:
-        print("RESULT (exit 2): DO NOT SHIP AS-IS — a critic refuted the claim or "
-              "found no supporting evidence. Fix the flaws or attach the evidence "
-              "each critic named, then re-verify.")
-        sys.exit(2)
-    if errors == total:
-        print("RESULT (exit 4): verification did NOT run — every critic errored. "
-              "This is NOT a pass. Fix critic auth/availability and re-run.")
-        sys.exit(4)
-    if errors:
-        print(f"RESULT (exit 1): inconclusive — {errors} of {total} critic(s) "
-              "errored, so the panel is incomplete. Re-run with working critics.")
-        sys.exit(1)
-    if supported == total:
-        print("RESULT (exit 3): UNVERIFIED — all critics support it, but consensus "
-              "is not truth. This counts only if the support is grounded in the "
-              "EVIDENCE_NEEDED each critic named. Go confirm that evidence "
-              "yourself; do not treat agreement as a pass.")
-        sys.exit(3)
-    print("RESULT (exit 1): inconclusive — mixed/uncertain verdicts. Provide the "
-          "evidence the critics asked for and re-run, or narrow the claim.")
-    sys.exit(1)
+    if args.json:
+        print(json.dumps({
+            "result": label,
+            "exit_code": code,
+            "tally": tally,
+            "critics": [{"critic": d["critic"], "verdict": d["verdict"],
+                         "ok": d["ok"]} for d in details],
+            "message": message,
+        }, ensure_ascii=False, indent=2))
+    else:
+        print("─" * 60)
+        print(f"Tally: {tally['supported']} supported · {tally['refuted']} refuted "
+              f"· {tally['unsupported']} unsupported · {tally['uncertain']} "
+              f"uncertain · {tally['error']} error")
+        print(f"RESULT (exit {code}): {message}")
+    sys.exit(code)
 
 
 if __name__ == "__main__":

@@ -40,8 +40,11 @@ echo "PROMPT" | python scripts/dispatch.py <provider> [--label NAME] [--model M]
 # Windows PowerShell — use the UTF-8 wrapper so CJK survives the pipe:
 'PROMPT' | & .\scripts\dispatch.ps1 <provider>
 
-# Adversarially cross-check a claim (anti-hallucination):
-echo "CLAIM" | python scripts/verify.py --critics <a,b>
+# Check which providers are installed / keyed / ready (offline):
+python scripts/dispatch.py --doctor
+
+# Adversarially cross-check a claim (anti-hallucination); --json for agents:
+echo "CLAIM" | python scripts/verify.py --critics <a,b> [--json]
 
 # See spend / success rates:
 python scripts/usage_report.py [--html]

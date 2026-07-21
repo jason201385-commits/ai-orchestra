@@ -3,6 +3,23 @@
 本專案所有重要變更皆記錄於此。
 格式依循 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [Unreleased]
+
+源自用 ai-orchestra 自我審查（Grok 外部審查 + Claude 交叉查核）後的第一批改進。
+
+### Added
+- `dispatch.py --doctor` — 離線檢查每個已啟用供應商是否就緒（CLI 在 PATH、
+  API key 是否設定、base_url 是否安全），解決冷啟動最大的卡點。
+- 供應商設定新增 `adversary = true` 旗標，明確指定 `verify.py` 的預設對手，
+  取代脆弱的 `role` 子字串比對（舊行為保留為後備）。
+- `verify.py --json` — 給 agent／腳本用的機器可讀報告。
+- `tests/test_verify.py` — 補上旗艦功能過去缺的測試（判定解析、退出碼矩陣、
+  對手選擇），共 14 個測試。
+
+### Changed
+- `verify.py` 的對手改為**平行**執行（先前為序列，是純粹的延遲成本）。
+- 退出碼決策抽成純函式 `synthesize()`，可測試、可被 `--json` 重用。
+
 ## [0.1.0] — 2026-07-21
 
 首次開源發行。從一個個人的 Claude Code skill 通用化為任何人都能對接自己 AI 訂閱的工具。

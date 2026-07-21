@@ -164,16 +164,18 @@ extra_headers = { "HTTP-Referer" = "https://your-app.example", "X-Title" = "ai-o
 
 | 欄位 | 意義 |
 |---|---|
-| `role` | 自由文字。`verify.py` 會從 role 含有 `review` 的供應商挑選預設的對手（審查方）。同時也只是給人看的註記。 |
+| `adversary` | `true` = 明確把這個供應商設為 `verify.py` 的預設對手（審查方）。**優先於** `role` 子字串比對；只要有任何供應商標了 `adversary`，選擇就只看這個旗標。總指揮永遠不會被選為預設對手。 |
+| `role` | 自由文字的人看註記。若沒有任何供應商標 `adversary`，`verify.py` 會退回到「role 含有 `review`」的舊啟發式來挑對手。 |
 | `enabled` | `false` 會保留該區塊，但讓該供應商在你翻回來之前無法使用。 |
-| `default_timeout` | 秒數；可用 `--timeout` 逐次呼叫覆寫。 |
+| `default_timeout` | 秒數；可用 `--timeout` 逐次呼叫覆寫（設 `0` 或負數會自動回退成 300）。 |
 | `model` | 預設模型；可用 `--model` 逐次呼叫覆寫。 |
 
 ## 驗證你的設定
 
 ```bash
-python scripts/dispatch.py --list     # shows every provider, type, enabled state
-python scripts/config.py              # same, with resolved home/data paths
+python scripts/dispatch.py --list     # 列出每個供應商、型別、啟用狀態
+python scripts/dispatch.py --doctor   # 離線檢查：CLI 在 PATH？key 有設？base_url 安全？
+python scripts/config.py              # 同上，並顯示解析後的 home/data 路徑
 ```
 
 接著來一次真正的呼叫：

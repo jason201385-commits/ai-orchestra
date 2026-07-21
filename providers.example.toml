@@ -29,11 +29,13 @@ command = "claude"
 role    = "coordinator, reviewer, fact-check"
 
 # OpenAI Codex CLI（ChatGPT 訂閱）。
+# adversary = true → verify.py 預設會拿它當交叉查核的對手（獨立於總指揮 claude）。
 [providers.codex]
-type    = "cli"
-kind    = "codex"
-command = "codex"
-role    = "independent reviewer, design"
+type      = "cli"
+kind      = "codex"
+command   = "codex"
+role      = "independent reviewer, design"
+adversary = true
 
 # xAI Grok CLI（grok.com 訂閱）。
 [providers.grok]

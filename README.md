@@ -45,8 +45,9 @@ cd ai-orchestra
 cp providers.example.toml config/providers.toml
 #    edit config/providers.toml — enable your providers, set models
 
-# 2. sanity check
+# 2. sanity check — 列出供應商，並檢查哪些「準備好了」
 python scripts/dispatch.py --list
+python scripts/dispatch.py --doctor     # CLI 在 PATH？key 有設？base_url 安全？
 ```
 
 需要 **Python 3.11+**（因為要用標準庫的 `tomllib`）。若使用 CLI 型供應商，

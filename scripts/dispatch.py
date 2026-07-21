@@ -915,6 +915,57 @@ CLI_ADAPTERS = {
 }
 
 
+def doctor(providers):
+    """Offline readiness check for each enabled provider: is the CLI on PATH,
+    is the API key set, is the base_url safe? Makes NO network calls."""
+    from shutil import which
+    from urllib.parse import urlparse
+    rows = []
+    for name in sorted(providers):
+        s = providers[name]
+        if not s.get("enabled", True):
+            rows.append((name, s["type"], "skip", "disabled in providers.toml"))
+            continue
+        if s["type"] == "cli":
+            cmd = s.get("command") or name
+            found = which(cmd) or which(cmd + ".cmd") or which(cmd + ".exe")
+            if found:
+                rows.append((name, f"cli:{s.get('kind')}", "OK",
+                             f"{cmd} on PATH — ensure you're logged in"))
+            else:
+                rows.append((name, f"cli:{s.get('kind')}", "MISSING",
+                             f"'{cmd}' not on PATH — install/login the CLI"))
+        elif s["type"] == "openai":
+            base = s.get("base_url") or ""
+            key_env = s.get("api_key_env") or ""
+            host = (urlparse(base).hostname or "").lower()
+            is_local = (host in ("localhost", "127.0.0.1", "::1")
+                        or host.endswith(".localhost"))
+            has_key = bool(os.environ.get(key_env)) if key_env else True
+            if not base:
+                rows.append((name, "openai", "BAD", "base_url not set"))
+            elif key_env and not has_key:
+                rows.append((name, "openai", "NO KEY", f"set env var {key_env}"))
+            elif key_env and urlparse(base).scheme != "https" and not is_local:
+                rows.append((name, "openai", "INSECURE",
+                             f"key over non-HTTPS {base} — use https or localhost"))
+            else:
+                rows.append((name, "openai", "OK",
+                             base + ("  (keyless local)" if not key_env else "")))
+        else:
+            rows.append((name, s["type"], "BAD", "unsupported type"))
+    w = max((len(r[0]) for r in rows), default=8) + 2
+    print(f"{'provider':<{w}}{'type':<13}{'status':<9}note")
+    print("-" * (w + 45))
+    ready = 0
+    for name, typ, status, note in rows:
+        ready += status == "OK"
+        print(f"{name:<{w}}{typ:<13}{status:<9}{note}")
+    enabled = [r for r in rows if r[2] != "skip"]
+    print(f"\n{ready}/{len(enabled)} enabled provider(s) ready "
+          f"({len(rows) - len(enabled)} disabled).")
+
+
 def normalize_stdin_prompt(prompt):
     """Remove only transport BOMs; preserve all user whitespace/content."""
     return prompt.lstrip("﻿")
@@ -982,6 +1033,10 @@ def main():
         help="list configured providers and exit",
     )
     ap.add_argument(
+        "--doctor", action="store_true",
+        help="check each enabled provider's readiness (offline) and exit",
+    )
+    ap.add_argument(
         "--retry-no-result", action="store_true",
         help=(
             "Claude only: retry once after a no-result timeout; opt-in because "
@@ -1013,6 +1068,14 @@ def main():
             flag = "" if s.get("enabled", True) else " (disabled)"
             role = f"  — {s['role']}" if s.get("role") else ""
             print(f"{name:<16}{s['type']:<8}{detail}{flag}{role}")
+        return
+
+    if args.doctor:
+        if not providers:
+            print("(no providers configured — copy providers.example.toml "
+                  "to config/providers.toml)")
+            return
+        doctor(providers)
         return
 
     if not args.provider:
