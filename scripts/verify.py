@@ -104,7 +104,10 @@ def run_critic(name: str, prompt: str, timeout: int) -> tuple:
 def parse_verdict(text: str) -> str:
     """Extract the verdict token robustly. Tolerates markdown (**VERDICT:**),
     an empty value, and the token appearing without exact spacing. Order matters:
-    check UNSUPPORTED before SUPPORTED so the substring doesn't shadow it."""
+    check UNSUPPORTED before SUPPORTED so the substring doesn't shadow it.
+    If an off-contract reply names several tokens on the line, the most negative
+    one wins (REFUTED > UNSUPPORTED > UNCERTAIN > SUPPORTED) — a deliberate bias
+    toward "DO NOT SHIP", the safe direction for a hallucination gate."""
     valid = ("REFUTED", "UNSUPPORTED", "UNCERTAIN", "SUPPORTED")
     for line in text.splitlines():
         s = line.strip().upper()

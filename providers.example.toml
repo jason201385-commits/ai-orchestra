@@ -1,49 +1,49 @@
 # ─────────────────────────────────────────────────────────────────────────
-#  ai-orchestra — declare the AI subscriptions you actually have.
+#  ai-orchestra — 宣告你實際擁有的 AI 訂閱。
 #
-#  Copy this file to  config/providers.toml  and keep only the blocks you use:
+#  將此檔案複製到  config/providers.toml  並只保留你會用到的區塊：
 #      cp providers.example.toml config/providers.toml
 #
-#  Two provider types cover essentially every paid AI plan on the market:
+#  兩種供應商類型基本上涵蓋市場上每一種付費 AI 方案：
 #
-#    type = "cli"     A command-line tool you're already logged into.
-#                     kind = claude | codex | grok | gemini  → purpose-built
-#                     kind = generic                         → any other CLI
+#    type = "cli"     一個你已經登入的命令列工具。
+#                     kind = claude | codex | grok | gemini  → 專用轉接器
+#                     kind = generic                         → 任何其他 CLI
 #
-#    type = "openai"  Any OpenAI-compatible /chat/completions HTTP endpoint.
-#                     One adapter, ~every hosted API + every local server.
+#    type = "openai"  任何 OpenAI 相容的 /chat/completions HTTP 端點。
+#                     一個轉接器，幾乎搞定每一種託管 API + 每一種本機伺服器。
 #
-#  Nothing here contains secrets. API keys are read from environment
-#  variables named by `api_key_env` — never write a key into this file.
+#  這裡沒有任何機密。API key 由 `api_key_env` 指定名稱的環境變數讀取——
+#  絕對不要把 key 寫進這個檔案。
 # ─────────────────────────────────────────────────────────────────────────
 
 
-# ===== CLI subscriptions (already-logged-in command-line tools) ===========
+# ===== CLI 訂閱（已登入的命令列工具） ===========
 
-# Claude Code — the recommended coordinator/reviewer. Purpose-built adapter:
-# streaming JSON, read-only "review" profile, plan-mode, budget controls.
+# Claude Code — 推薦的總指揮／審查方。專用轉接器：
+# 串流 JSON、唯讀「review」設定檔、plan-mode、預算控制。
 [providers.claude]
 type    = "cli"
 kind    = "claude"
 command = "claude"
 role    = "coordinator, reviewer, fact-check"
 
-# OpenAI Codex CLI (ChatGPT subscription).
+# OpenAI Codex CLI（ChatGPT 訂閱）。
 [providers.codex]
 type    = "cli"
 kind    = "codex"
 command = "codex"
 role    = "independent reviewer, design"
 
-# xAI Grok CLI (grok.com subscription).
+# xAI Grok CLI（grok.com 訂閱）。
 [providers.grok]
 type    = "cli"
 kind    = "grok"
 command = "grok"
 role    = "web-culture, copy, second opinion"
-enabled = false   # flip to true once you've installed & logged into the CLI
+enabled = false   # 安裝並登入 CLI 後改成 true
 
-# Google Gemini CLI.
+# Google Gemini CLI。
 [providers.gemini]
 type    = "cli"
 kind    = "gemini"
@@ -51,9 +51,9 @@ command = "gemini"
 role    = "second opinion"
 enabled = false
 
-# Any OTHER command-line agent you like — the generic CLI adapter.
-# {prompt} is substituted with your prompt. If you omit {prompt} and set
-# stdin = true, the prompt is piped to the tool's standard input instead.
+# 任何你喜歡的其他命令列 agent——通用 CLI 轉接器。
+# {prompt} 會被替換成你的 prompt。若省略 {prompt} 並設定
+# stdin = true，prompt 會改為透過管線送進工具的標準輸入。
 [providers.mycli]
 type    = "cli"
 kind    = "generic"
@@ -63,13 +63,13 @@ stdin   = false
 enabled = false
 
 
-# ===== OpenAI-compatible HTTP APIs (one adapter fits all) ==================
-# For each, set the environment variable named in api_key_env before use,
-# e.g.  export OPENAI_API_KEY=sk-...    (PowerShell: $env:OPENAI_API_KEY="sk-...")
+# ===== OpenAI 相容的 HTTP API（一個轉接器全部適用） ==================
+# 每一個都要在使用前設定 api_key_env 指定名稱的環境變數，
+# 例如  export OPENAI_API_KEY=sk-...    （PowerShell：$env:OPENAI_API_KEY="sk-..."）
 
-# NOTE: OpenAI's GPT-5-class / reasoning models on this endpoint expect the token
-# cap under "max_completion_tokens" (plain "max_tokens" is rejected). Hence the
-# max_tokens_param below. Set max_tokens = 0 to omit the cap entirely.
+# 注意：OpenAI 在此端點上的 GPT-5 等級／推理模型，其 token 上限
+# 要放在 "max_completion_tokens"（單純的 "max_tokens" 會被拒絕）。所以
+# 才有下面的 max_tokens_param。設定 max_tokens = 0 可完全省略上限。
 [providers.openai]
 type             = "openai"
 base_url         = "https://api.openai.com/v1"
@@ -79,7 +79,7 @@ max_tokens_param = "max_completion_tokens"
 role             = "reviewer, generalist"
 enabled          = false
 
-# Anthropic's OpenAI-compatible endpoint (use your Anthropic API key).
+# Anthropic 的 OpenAI 相容端點（使用你的 Anthropic API key）。
 [providers.anthropic_api]
 type        = "openai"
 base_url    = "https://api.anthropic.com/v1"
@@ -95,7 +95,7 @@ model       = "deepseek-chat"
 role        = "cheap batch, long context"
 enabled     = false
 
-# Groq — very fast inference of open models.
+# Groq — 開源模型的極快推論。
 [providers.groq]
 type        = "openai"
 base_url    = "https://api.groq.com/openai/v1"
@@ -103,7 +103,7 @@ api_key_env = "GROQ_API_KEY"
 model       = "llama-3.3-70b-versatile"
 enabled     = false
 
-# xAI Grok via API (alternative to the CLI above).
+# xAI Grok 透過 API（上面 CLI 的替代方案）。
 [providers.xai]
 type        = "openai"
 base_url    = "https://api.x.ai/v1"
@@ -118,7 +118,7 @@ api_key_env = "MISTRAL_API_KEY"
 model       = "mistral-large-latest"
 enabled     = false
 
-# OpenRouter — one key, hundreds of models. Great for adding many "voices".
+# OpenRouter — 一把 key，數百個模型。很適合加入許多「聲音」。
 [providers.openrouter]
 type        = "openai"
 base_url    = "https://openrouter.ai/api/v1"
@@ -126,7 +126,7 @@ api_key_env = "OPENROUTER_API_KEY"
 model       = "anthropic/claude-sonnet-5"
 enabled     = false
 
-# NVIDIA NIM — a generous free tier for batch/bulk work.
+# NVIDIA NIM — 慷慨的免費額度，適合批量／大量工作。
 [providers.nim]
 type        = "openai"
 base_url    = "https://integrate.api.nvidia.com/v1"
@@ -135,10 +135,10 @@ model       = "meta/llama-3.3-70b-instruct"
 role        = "bulk drafts, translation, summarization"
 enabled     = false
 
-# ── Local, no key required ────────────────────────────────────────────────
-# Ollama (http://localhost:11434) — set api_key_env = "" for keyless local.
-# FIRST run `ollama pull <model>`, then set `model` to a tag you actually have
-# (check `ollama list`), or the first call returns an opaque model-not-found.
+# ── 本機，不需 key ────────────────────────────────────────────────
+# Ollama (http://localhost:11434) — 設定 api_key_env = "" 即為免 key 本機使用。
+# 先執行 `ollama pull <model>`，再把 `model` 設成你實際擁有的 tag
+# （用 `ollama list` 查看），否則第一次呼叫會回傳一個看不懂的 model-not-found。
 [providers.ollama]
 type        = "openai"
 base_url    = "http://localhost:11434/v1"
@@ -147,7 +147,7 @@ model       = "llama3.3"
 role        = "local, private, free"
 enabled     = false
 
-# LM Studio local server.
+# LM Studio 本機伺服器。
 [providers.lmstudio]
 type        = "openai"
 base_url    = "http://localhost:1234/v1"

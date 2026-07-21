@@ -1,140 +1,125 @@
-# Reducing hallucination with multiple AIs (the honest version)
+# 用多個 AI 降低幻覺（誠實版）
 
-> The uncomfortable starting point, from a reader named **lasxt1995**:
-> *"One AI hallucinates; five AIs also hallucinate."*
+> 一個令人不太舒服的出發點，來自一位名叫 **lasxt1995** 的讀者：
+> 「一個AI有幻覺 五個AI也有幻覺。」
 
-Running the same question past several models and going with the majority feels
-rigorous. It usually isn't. Models share training data and failure modes, so
-they can be **confidently wrong together**. A debate between them often just
-surfaces which model lost the thread first — not what is true.
+把同一個問題丟給好幾個模型、然後採多數決，感覺很嚴謹。但通常不是。
+模型共用訓練資料，也共用相同的失效模式，所以它們可能**一起自信地錯**。
+它們之間的辯論，往往只是暴露出哪個模型最先跟丟了脈絡——而不是什麼才是真相。
 
-This document is the protocol `ai-orchestra` is built around. It came out of a
-[public thread](https://www.threads.com/@jasonchiou2016/post/Da-bv1Xk4Wj) where
-dozens of practitioners pushed back on "just make them debate 5 rounds." Their
-combined answer: hallucination drops from **grounding, proof, a cheap
-adversary, and replay** — not from more rounds of agreement.
-
----
-
-## The one rule
-
-**A claim with no source, no `file:line`, and no runnable proof is unverified —
-no matter how many models agree with it, and no matter how plausible it sounds.**
-
-Everything below is machinery for enforcing that rule cheaply.
+這份文件就是 `ai-orchestra` 所圍繞建立的協定。它源自一則
+[公開討論串](https://www.threads.com/@jasonchiou2016/post/Da-bv1Xk4Wj)，
+其中數十位實務工作者對「就讓它們辯個五輪」提出反駁。他們合起來的答案是：
+幻覺的下降來自**接地（grounding）、證明、一個便宜的對手，以及回放**——
+而不是來自更多輪的彼此同意。
 
 ---
 
-## The four levers that actually work
+## 唯一的一條規則
 
-### 1. Ground every claim in a real source
-Pin the model to specific inputs and demand a citation for each assertion.
-- *"Require it to cite the source for every sentence."* — **paul.chen.pwc**
-- *"Give it definite data sources; don't let it answer from training data."* — **lin081626**
+**一個沒有來源、沒有 `file:line`、也沒有可執行證明的宣稱就是未經查證的——
+無論有多少模型同意它，也無論它聽起來多合理。**
 
-A common, invisible hallucination: the model **never actually ran the web
-search or opened the file**, and answered from memory instead. Check that the
-retrieval step really happened before you trust what depends on it.
-
-### 2. Demand proof-of-work, not assertions
-- *"Zero-Trust governance: anything a model claims about itself must produce
-  proof-of-work, and pass tests plus QC by another agent."* — **quant_david** (the
-  most-upvoted reply in the thread)
-
-"I updated the config" is a claim. The diff, the passing test, the command
-output is proof. Ask for the proof; if it can't be produced, the work didn't
-happen.
-
-### 3. One good adversary beats five agreeable rounds
-- *"One writes, one specifically finds fault. Writer → adversarial reviewer,
-  one round is enough — far fewer tokens than five rounds of debate. Every
-  conclusion must attach a source or actually run a command; no evidence →
-  redo. Cuts hallucination in half."* — **kanisleo328**
-- *"I keep only two rounds for decision-changing questions: one to find
-  counterexamples, one to verify. Otherwise lock it with tests and sources, so
-  I don't spend 5× the tokens for the same conclusion."* — **ovveai_api**
-
-The point of a second model is **disagreement**, not a second vote. Give it the
-opposing brief: *find the flaw, refute this, name the evidence that would make
-it false.* That is what `verify.py` does.
-
-### 4. Verify completion by replay, not by claim
-- *"How do you confirm the agent actually finished, instead of just saying it
-  did? A CLI-level replay gate — if the replay doesn't pass, the goal doesn't
-  pass."* — **pukpuklouis** (referencing a replay-gate approach)
-
-For anything with side effects, re-run / re-read the result and confirm the
-end state. "Done" is a claim (lever 2); the re-read is the proof.
-
-### Bonus lever: first-principles re-derivation
-- *"Have the agent re-think from first principles, or periodically re-check its
-  own reasoning."* — **solitude6060**
-
-When a conclusion matters, make one pass that ignores the prior reasoning and
-rebuilds it from the ground facts. If the two derivations disagree, you found a
-hallucination.
+底下的一切，都是為了以低成本強制執行這條規則所打造的機制。
 
 ---
 
-## What does *not* reduce hallucination
+## 真正有效的四根槓桿
 
-- **Adding more models that agree.** Redundant voices with the same blind spot
-  inflate confidence without adding evidence. `verify.py` explicitly refuses to
-  treat unanimous-but-unsourced agreement as verification — even all-support
-  returns a non-zero "UNVERIFIED — consensus is not proof" exit code, never a
-  pass, so a script can't mistake agreement for a green light.
-- **More debate rounds.** Past ~1–2 focused rounds you are usually paying tokens
-  to relitigate the same context, not to find new counterevidence.
-- **Over-orchestration.** As **harry58892** put it: fix the prompt where the
-  model actually fails; a clear spec and one capable model often beats a
-  hierarchy of agents. Reach for multiple AIs when a task genuinely benefits
-  from an independent adversary — not by default.
+### 1. 讓每個宣稱都接地到真實來源
+把模型釘在特定輸入上，並要求每個論斷都附引用。
+- 「要求他每句話都要引用。」——**paul.chen.pwc**
+- 「沒有實際執行網路搜尋，一直用訓練資料回覆問題。」——**lin081626**
+
+一種常見、卻看不見的幻覺：模型**其實根本沒有真的去跑那次網路搜尋、或打開那個檔案**，
+而是改用記憶回答。在你信任任何依賴它的東西之前，先確認擷取（retrieval）這一步真的發生過。
+
+### 2. 要工作證明，不要空口宣稱
+- 「採用 Zero Trust 的治理機制，凡是自己宣稱的東西，都要提出工作證明。同時要通過測試程式與別的代理的QC。」
+  ——**quant_david**（整串裡得票最高的回覆）
+
+「我更新了設定」是一個宣稱。那個 diff、那個通過的測試、那段指令輸出才是證明。
+把證明要出來；如果拿不出來，這件工作就沒發生過。
+
+### 3. 一個好對手勝過五輪彼此點頭
+- 「一個寫一個專門找碴：Claude 寫完丟給 Codex 用反方立場審，一輪就夠，比五輪抗辯省很多 token……每個結論都要附來源或實際跑指令驗證，拿不出證據就重做，幻覺會少一大半。」
+  ——**kanisleo328**
+- 「我後來只留兩輪給『會改決策的問題』：一輪找反例、一輪驗收……才不會五倍 token 換同一個結論。」
+  ——**ovveai_api**
+
+第二個模型的意義在於**唱反調**，而不是投第二票。給它反方的任務書：
+*找出破綻、反駁這個結論、指出什麼證據會讓它為假。* 這就是 `verify.py` 做的事。
+
+### 4. 用回放而非用宣稱來驗證是否完成
+- 「怎麼回放確認agent都完成了任務而不是宣稱說完成了？」一個 CLI 層級的回放閘門——
+  「只要回放沒有過，這級別的goal就不會過。」——**pukpuklouis**（引用了一套回放閘門的做法）
+
+對任何有副作用的東西，重新跑一遍／重新讀一次結果，並確認最終狀態。
+「完成了」是一個宣稱（槓桿 2）；那次重讀才是證明。
+
+### 加碼槓桿：以第一性原理重新推導
+- 「要Agent以第一性原理重新思考或是定期檢查自己的思維。」——**solitude6060**
+
+當一個結論很重要時，就做一次無視先前推理、純粹從基礎事實重建的推導。
+如果兩次推導彼此不一致，你就抓到了一個幻覺。
 
 ---
 
-## The protocol, step by step
+## 什麼*不能*降低幻覺
 
-1. **Write the spec, not just the ask.** Ambiguity is the cheapest source of
-   "hallucination". State the inputs, the definition of done, and the acceptance
-   check up front.
-2. **Do the work with your primary model** (the coordinator — Claude Code in the
-   default config), and require it to attach evidence inline: `file:line`,
-   command output, source URLs.
-3. **Cross-examine with one independent adversary.** Pipe the answer through
-   `verify.py --critics <a different provider>`. The critic's job is to refute
-   and to name the single piece of evidence that would settle it.
-4. **Resolve on evidence, not on vote.** If the critic refutes or finds the
-   claim unsupported → fix or attach proof, then re-verify. If it "supports" but
-   only by agreeing → still unverified; go confirm the named evidence yourself.
-5. **Replay side effects.** Re-read files, re-run commands, confirm the end
-   state matches the spec.
-6. **Meter it.** Every dispatch is logged (`data/ledger.jsonl`) so you can see
-   whether the extra rounds are buying accuracy or just burning tokens.
+- **加更多會彼此附和的模型。** 帶著同一個盲點的冗餘聲音，只會在不增加任何證據的情況下
+  灌水信心。`verify.py` 明確拒絕把「全體同意但無來源」當成查證通過——
+  即使全數支持，回傳的也是一個非零的「UNVERIFIED — consensus is not proof」退出碼，
+  絕不會是通過，這樣腳本就不會把「同意」誤當成綠燈。
+- **更多輪的辯論。** 超過大約 1～2 輪聚焦的來回之後，你通常只是在付 token 重打同一份脈絡的官司，
+  而不是在找新的反證。
+- **過度指揮（over-orchestration）。** 正如 **harry58892** 所說：
+  「提示詞做好的話，一個AI一次做好就夠了，不用用到階層架構。」
+  在模型真正出錯的地方去修提示詞；一份清楚的規格加上一個夠力的模型，
+  往往勝過一整套代理階層。只有在一個任務確實能從獨立對手身上獲益時，才動用多個 AI——
+  而不是預設就用。
 
 ---
 
-## How the tools map to the protocol
+## 協定，一步一步來
 
-| Protocol step | Tool |
+1. **寫下規格，而不只是提出要求。** 模糊性是「幻覺」最便宜的來源。
+   一開始就把輸入、完成的定義，以及驗收檢查講清楚。
+2. **用你的主力模型做這件工作**（總指揮——在預設設定裡是 Claude Code），
+   並要求它把證據隨行附上：`file:line`、指令輸出、來源 URL。
+3. **用一個獨立對手交叉盤問。** 把答案透過 `verify.py --critics <換一個供應商>` 過一遍。
+   對手（審查方）的任務是反駁，並指出那個能一錘定音的單一證據是什麼。
+4. **靠證據裁決，而不是靠投票。** 如果對手反駁成功、或發現宣稱缺乏支撐 →
+   修正或補上證明，然後重新查證。如果它「支持」但只是因為附和 →
+   仍然是未經查證；自己去確認它點名的那個證據。
+5. **回放副作用。** 重新讀檔、重新跑指令，確認最終狀態符合規格。
+6. **記帳。** 每一次派工都會被記錄（`data/ledger.jsonl`），
+   讓你看得出多跑的那幾輪是買到了準確度、還是只是在燒 token。
+
+---
+
+## 工具如何對應到協定
+
+| 協定步驟 | 工具 |
 |---|---|
-| Independent, read-only reviewer that obeys your repo's `AGENTS.md` | `dispatch.py <claude> --claude-profile review` |
-| One-adversary cross-check with an evidence demand + honest "consensus ≠ truth" verdict | `verify.py --critics <provider>` |
-| Route grunt work to a cheap/bulk provider to save your scarce coordinator budget | `dispatch.py <openai-compatible provider>` |
-| See whether extra verification is worth the spend | `usage_report.py` |
+| 遵守你 repo 的 `AGENTS.md`、獨立且唯讀的審查者 | `dispatch.py <claude> --claude-profile review` |
+| 帶證據要求的單一對手交叉查核，並給出誠實的「共識不等於真相」判定 | `verify.py --critics <provider>` |
+| 把苦力活路由到便宜／大量的供應商，省下你稀缺的總指揮預算 | `dispatch.py <openai-compatible provider>` |
+| 看看多做的那層查證值不值得那筆花費 | `usage_report.py` |
 
-The design bias throughout: **honest > complete.** If a number, a source, or a
-completion can't be verified, the tools say "unknown" rather than fill in a
-confident-looking blank. That same discipline is what keeps hallucinations out.
+貫穿整個設計的偏好是：**誠實優先於完整。** 如果一個數字、一個來源、或一次完成無法被查證，
+工具會說「未知」，而不是填上一個看起來很自信的空格。同樣這份紀律，
+正是把幻覺擋在門外的關鍵。
 
 ---
 
-## Credits
+## 致謝
 
-This protocol is a synthesis of a generous public discussion. Thanks to
-**quant_david, lasxt1995, kanisleo328, ovveai_api, paul.chen.pwc, lin081626
-(CloverAI-Family), pukpuklouis, solitude6060, harry58892, mat.vmk3s_,
-jackyyyso**, and everyone else who replied. Related work they shared:
+這份協定，是一場慷慨的公開討論的綜合成果。感謝
+**quant_david、lasxt1995、kanisleo328、ovveai_api、paul.chen.pwc、lin081626
+（CloverAI-Family）、pukpuklouis、solitude6060、harry58892、mat.vmk3s_、
+jackyyyso**，以及所有其他回覆的人。他們分享的相關作品：
 
-- [CloverAI-Family/agent-guardrails](https://github.com/CloverAI-Family/agent-guardrails) — governance framework for multi-agent teams
-- [drpwchen/textbook-to-note](https://github.com/drpwchen/textbook-to-note) — fully-cited, source-grounded notes
-- [solitude6060/Yao-skills](https://github.com/solitude6060/Yao-skills) — a first-principles skill
+- [CloverAI-Family/agent-guardrails](https://github.com/CloverAI-Family/agent-guardrails) — 多代理團隊的治理框架
+- [drpwchen/textbook-to-note](https://github.com/drpwchen/textbook-to-note) — 完整引用、以來源接地的筆記
+- [solitude6060/Yao-skills](https://github.com/solitude6060/Yao-skills) — 一個第一性原理的 skill

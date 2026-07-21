@@ -1,36 +1,23 @@
 # Changelog
 
-All notable changes to this project are documented here.
-The format is based on [Keep a Changelog](https://keepachangelog.com/).
+本專案所有重要變更皆記錄於此。
+格式依循 [Keep a Changelog](https://keepachangelog.com/)。
 
 ## [0.1.0] — 2026-07-21
 
-First open-source release. Generalized from a personal Claude Code skill into a
-tool anyone can point at their own AI subscriptions.
+首次開源發行。從一個個人的 Claude Code skill 通用化為任何人都能對接自己 AI 訂閱的工具。
 
 ### Added
-- **Config-driven providers** (`config/providers.toml`). Declare any number of
-  AI plans with two types: `cli` (claude / codex / grok / gemini / generic) and
-  `openai` (any OpenAI-compatible HTTP API — OpenAI, DeepSeek, Groq, OpenRouter,
-  Mistral, xAI, NVIDIA NIM, local Ollama / LM Studio, …). No code to add a
-  provider.
-- **`verify.py`** — an adversarial cross-check that demands evidence and refuses
-  to treat mere consensus as verification. Implements the community-sourced
-  anti-hallucination protocol.
-- **`docs/anti-hallucination.md`** — the protocol, distilled from a public
-  discussion, with credits.
-- Full docs: providers, quota/metering, architecture; bilingual README (EN + 繁中).
-- MIT license, `.gitignore`, contributing guide.
+- **設定驅動的供應商**（`config/providers.toml`）。可宣告任意數量的 AI 方案，分為兩種類型：`cli`（claude / codex / grok / gemini / generic）與 `openai`（任何 OpenAI 相容的 HTTP API — OpenAI、DeepSeek、Groq、OpenRouter、Mistral、xAI、NVIDIA NIM、本機 Ollama / LM Studio…）。新增供應商不需要寫任何程式碼。
+- **`verify.py`** — 一種對抗式交叉查核，要求提供證據，並拒絕把單純的共識當成已驗證。實作了源自社群的抗幻覺協定。
+- **`docs/anti-hallucination.md`** — 該協定，從一場公開討論中提煉而成，並附上致謝。
+- 完整文件：供應商、額度／記帳、架構；雙語 README（EN + 繁中）。
+- MIT 授權、`.gitignore`、貢獻指南。
 
 ### Changed
-- `dispatch.py` refactored from a hardcoded 6-provider list into a config-driven
-  dispatcher, while preserving the streaming/timeout/process-tree/serialization
-  machinery for the Claude adapter.
-- Quota scripts now resolve their home via `config.py` (honouring
-  `$AI_ORCHESTRA_HOME`) instead of a fixed path.
-- Live-quota probing is now framed as an optional, best-effort feature that
-  degrades to universal ledger-based counting.
+- `dispatch.py` 從原本寫死的 6 個供應商清單重構為設定驅動的調度器，同時保留了 Claude 轉接器的串流／逾時／行程樹／序列化機制。
+- 額度腳本現在透過 `config.py` 解析其家目錄（尊重 `$AI_ORCHESTRA_HOME`），不再使用固定路徑。
+- 即時額度探測現在被定位為選用的、盡力而為的功能，在無法使用時會退回到通用的記帳檔計數。
 
 ### Removed
-- Personal data and setup-specific hardcoding (the original author's usage
-  ledger, machine paths, and a bespoke desktop-app provider).
+- 個人資料與特定安裝環境的寫死內容（原作者的用量記帳檔、機器路徑，以及一個客製的桌面應用程式供應商）。
