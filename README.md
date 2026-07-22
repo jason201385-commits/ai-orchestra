@@ -38,7 +38,7 @@ NVIDIA NIM、本地的 Ollama/LM Studio……）—— 全部透過**一個指�
 ## 安裝（60 秒）
 
 ```bash
-git clone https://github.com/<you>/ai-orchestra.git
+git clone https://github.com/jason201385-commits/ai-orchestra.git
 cd ai-orchestra
 
 # 1. declare the subscriptions you actually have
