@@ -202,6 +202,12 @@ ai-orchestra/
 
 ## 致謝
 
+**靈感來源 🙏：** 這個專案的點子源自 Ted Huang（[@teddashh](https://github.com/teddashh)）的
+[**Multi-AI Chat Desktop**](https://github.com/teddashh/multi-ai-chat-desktop) —— 一個用 Tauri
+打造、把已登入的 ChatGPT / Claude / Gemini / Grok 網頁整進單一控制台、讓它們協作互審的桌面 App
+（零 API key、MIT）。ai-orchestra 從那個「讓多個 AI 互相審查」的核心概念出發，走 CLI／API 派工
+＋ 對抗式證據查核這條互補的路。**謝謝 Ted 的啟發。**
+
 誕生自一則關於打敗 AI 幻覺的 [Threads 討論串](https://www.threads.com/@jasonchiou2016/post/Da-bv1Xk4Wj)。
 這套反幻覺協定濃縮了以下這些人的回覆：**quant_david、lasxt1995、kanisleo328、
 ovveai_api、paul.chen.pwc、lin081626（CloverAI-Family）、pukpuklouis、solitude6060、
@@ -224,5 +230,7 @@ harry58892、mat.vmk3s_、jackyyyso** 以及其他人。謝謝你們。他們分
 - **Honest metering** — every call is logged locally; unverifiable numbers say "unknown", never a confident zero.
 - **Anti-hallucination by design** — a one-adversary `verify.py` cross-check that demands evidence and refuses to rubber-stamp mere consensus.
 - **No dependencies** — pure Python 3.11+ standard library.
+
+**Inspired by** [Multi-AI Chat Desktop](https://github.com/teddashh/multi-ai-chat-desktop) by Ted Huang ([@teddashh](https://github.com/teddashh)) — a Tauri app that orchestrates logged-in ChatGPT/Claude/Gemini/Grok webviews to collaborate and review each other. ai-orchestra takes that "let multiple AIs cross-check each other" idea down a complementary CLI/API + evidence-verified path. Thank you, Ted. 🙏
 
 Full documentation above is in Traditional Chinese (Taiwan). [MIT](LICENSE) © 2026 Jason Chiou.
