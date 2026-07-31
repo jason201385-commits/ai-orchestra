@@ -88,6 +88,51 @@ python scripts/usage_report.py [--html]
 4. **以證據定案** —— 修正或附上證明，然後重新驗證。
 5. **檢視記帳檔** —— 確認多跑的那幾輪買到的是準確度，而不只是 token。
 
+## 靜默失敗：`rc=0` 不是模型的工作證明
+
+這是本專案付出最貴代價學到的一課，值得單獨一節。
+
+**症狀**：dispatch 回 exit 0、記帳檔 `ok=true`、`prompt_chars` 跟你的來源檔完全吻合，
+但模型回覆的是「請貼上完整內容／你的訊息中沒有出現…」。換一家供應商、同樣的 prompt 卻正常。
+
+**根因**：在 Windows 上，npm 安裝的 CLI（`codex`、`gemini` 等）是 `.cmd` 包裝器。
+CreateProcess 看到 `.cmd` 不會直接執行它，而是交給 `cmd.exe`；
+**`cmd.exe` 的解析器把換行視為命令結束**，`\n` 之後的內容整段丟掉，
+不報錯、子行程照樣 exit 0。所以把多行 prompt 當命令列參數傳，模型只會收到第一行。
+
+實測（用一個會傾印 argv 的假 `.cmd` 包裝器量的）：
+
+| 傳法 | 送出 | 子行程實際收到 |
+|---|---|---|
+| argv，多行 | 87 字元 / 4 行 | **17 字元，只剩第 1 行** |
+| argv，單行 | 95 字元 | 95 字元完整（`% & \| ^ < >` 都沒事） |
+| stdin | 全長 | 完整 |
+
+不是編碼問題、不是 emoji、不是長度、不是指示順序 —— 就是換行 × `.cmd`。
+
+**因應（已內建）**：
+
+1. `codex` 與 `gemini` 轉接器一律把 prompt 送 **stdin**，不放 argv。
+2. `run_cmd()` / `run_streaming_json_cmd()` 前置 `argv_newline_truncation_risk()`：
+   只要執行檔是 `.cmd`／`.bat` 且任一參數含換行，直接回 `rc=-3` 明確報錯，
+   **不讓它靜默截斷**。任何新增的轉接器都自動受保護。
+3. 成功判定加上 `detect_empty_input_reply()`：送出 ≥200 字元卻收到 ≤400 字元、
+   且內容命中「請貼上／沒有收到／appears empty／didn't receive…」等樣式時，
+   判為傳輸失敗（`ok=false`、`err_kind=empty_input_reply`、exit 1），
+   回覆仍印到 stdout 供人工判讀。三個門檻同時成立才觸發，避免誤殺
+   「真的在請你補資料」的長答案。
+
+**通則**：`dispatch.py --doctor` 只驗 CLI 在不在 PATH，驗不出傳輸層問題。
+懷疑某家「有回但像沒收到」時，先查它解析到什麼 ——
+`python -c "from shutil import which; print(which('codex'))"`，
+結尾是 `.CMD`／`.BAT` 就是高風險。
+
+**同一族的第三種**：把背景派工的輸出接 `| tail -N` 也會靜默截斷，
+而且記帳檔只存 metadata、不留全文，截掉就救不回來。背景派工一律導向檔案，
+跑完再讀。**凡是「內容經過某個東西」的地方，都要有辦法驗證它有沒有全部通過。**
+
+回歸測試：`tests/test_dispatch_transport.py`。
+
 ## 反模式
 
 - ❌ 對每個模型問同一個問題（浪費額度）—— 價值在於
@@ -95,6 +140,9 @@ python scripts/usage_report.py [--html]
 - ❌ 相信任何單一模型的「事實」—— 把宣稱送去驗證。
 - ❌ 忘了記帳 —— 一律走 `dispatch.py`，讓儀表板保持誠實。
 - ❌ 對一個清楚的 prompt + 一個有能力的模型就能搞定的任務過度編排。
+- ❌ 新增轉接器時把多行 prompt 塞進 argv —— Windows 的 `.cmd` 包裝器會靜默
+  截斷（見上節），一律走 stdin。
+- ❌ 拿 `rc=0` 當「模型收到了」—— 那只證明行程結束；傳輸層壞掉一樣是 exit 0。
 
 ## 設定
 

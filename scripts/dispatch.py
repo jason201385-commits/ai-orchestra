@@ -41,6 +41,11 @@ from config import DATA_DIR, LEDGER, load_providers  # noqa: E402
 
 CLAUDE_LOCK = DATA_DIR / "claude-dispatch.lock"
 CLAUDE_MAX_ATTEMPTS = 2
+QUOTA_CACHE = DATA_DIR / "quota_cache.json"
+# 只擋「主窗口」metric;model 級(week_model:*/model:*)與 credits 不代表整家額度
+QUOTA_GATE_METRICS = {"5h", "week_all", "week"}
+QUOTA_GATE_PERCENT = 80
+QUOTA_CACHE_STALE_HOURS = 6
 DEADLINE_DRAIN_GRACE_SECONDS = 0.2
 DEADLINE_DRAIN_MAX_LINES = 10_000
 RESULT_SHUTDOWN_GRACE_SECONDS = 0.2
@@ -76,8 +81,80 @@ def classify_err(err, rc=None) -> str:
         return "unclassified"
 
 
+# A provider can exit 0 with a well-formed reply that nonetheless proves the
+# prompt never arrived ("please paste the content again"). Recording that as a
+# success inflates the quota dashboard and hides transport bugs. Only flag it
+# when a substantial prompt draws a short reply that is *only* a complaint
+# about missing input — a real answer that happens to ask for more material is
+# far longer than SUSPECT_MAX_REPLY_CHARS.
+SUSPECT_MIN_PROMPT_CHARS = 200
+SUSPECT_MAX_REPLY_CHARS = 400
+EMPTY_INPUT_REPLY_PATTERNS = (
+    r"請(重新)?(貼上|提供|附上)",
+    r"(沒有|未|沒)(看到|收到|附上|出現|提供)",
+    r"(內容|訊息|附件|貼文)(是|為)?空(的|白)",
+    r"我這邊(沒有|看不到)",
+    r"(這則|你的)訊息中?沒有",
+    r"please (paste|provide|share|resend|attach)",
+    r"(didn't|did not|haven't|have not) receive",
+    r"(don't|do not|can't|cannot) see any (content|text|message|attachment)",
+    r"(appears|seems) (to be )?empty",
+    r"no (content|text|input) (was )?(provided|included|attached)",
+)
+
+
+def detect_empty_input_reply(prompt, text):
+    """Return a reason string when `text` reads as "I got no input", else ''."""
+    body = (text or "").strip()
+    if len(prompt) < SUSPECT_MIN_PROMPT_CHARS or not body:
+        return ""
+    if len(body) > SUSPECT_MAX_REPLY_CHARS:
+        return ""
+    for pat in EMPTY_INPUT_REPLY_PATTERNS:
+        m = re.search(pat, body, re.I)
+        if m:
+            excerpt = " ".join(body.split())[:120]
+            return (
+                f"provider replied as if the prompt was empty "
+                f"({len(prompt)} chars sent, {len(body)}-char reply matched "
+                f"{m.group(0)!r}): {excerpt}"
+            )
+    return ""
+
+
+SHIM_SUFFIXES = (".cmd", ".bat")
+
+
+def argv_newline_truncation_risk(cmd):
+    """Return an error string if this argv would be silently truncated, else ''.
+
+    A .cmd/.bat "executable" is never run directly by Windows: CreateProcess
+    hands the whole command line to cmd.exe, which stops parsing at the first
+    newline and discards the rest. The child then starts with a truncated
+    argument and exits 0, so the caller sees success while the model saw only
+    the prompt's first line. npm-installed CLIs (codex, and anything else
+    installed that way) are exactly this kind of shim — send multi-line text on
+    stdin instead of in argv.
+    """
+    if os.name != "nt" or not cmd:
+        return ""
+    if not str(cmd[0]).lower().endswith(SHIM_SUFFIXES):
+        return ""
+    for i, a in enumerate(cmd[1:], start=1):
+        if "\n" in str(a) or "\r" in str(a):
+            return (
+                f"argv[{i}] contains a newline and {Path(cmd[0]).name} is a "
+                f"Windows .cmd/.bat shim; cmd.exe would silently truncate the "
+                f"command line there. Pass this text on stdin instead."
+            )
+    return ""
+
+
 def run_cmd(cmd, timeout, input_text=None, cwd=None):
     t0 = time.monotonic()
+    truncation_risk = argv_newline_truncation_risk(cmd)
+    if truncation_risk:
+        return -3, "", truncation_risk, time.monotonic() - t0
     try:
         p = subprocess.run(
             cmd, capture_output=True, timeout=timeout,
@@ -305,6 +382,9 @@ def run_streaming_json_cmd(cmd, timeout, provider, input_text=None):
     if timeout <= 0:
         raise ValueError("timeout must be positive")
     t0 = time.monotonic()
+    truncation_risk = argv_newline_truncation_risk(cmd)
+    if truncation_risk:
+        return -3, "", truncation_risk, time.monotonic() - t0
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     try:
         process = subprocess.Popen(
@@ -666,11 +746,17 @@ def call_grok(spec, prompt, model, timeout):
 
 def call_codex(spec, prompt, model, timeout):
     exe = find_exe(spec.get("command") or "codex")
+    # The prompt goes on stdin ('-' as the positional), never in argv: on
+    # Windows `codex` is an npm .cmd shim, so an argv prompt is routed through
+    # cmd.exe and cut at the first newline — the model then receives only the
+    # first line and answers "please paste the content" while rc stays 0.
+    # See argv_newline_truncation_risk(). `codex exec --help`: "If not provided
+    # as an argument (or if `-` is used), instructions are read from stdin."
     cmd = [exe, "exec", "--skip-git-repo-check", "--json"]
     if model:
         cmd += ["-m", model]
-    cmd.append(prompt)
-    rc, out, err, dur = run_cmd(cmd, timeout, input_text="")
+    cmd.append("-")
+    rc, out, err, dur = run_cmd(cmd, timeout, input_text=prompt)
     text, usage, rate = "", {}, {}
     for j in parse_json_blobs(out):
         # token usage event: {"type":"turn.completed","usage":{...}}
@@ -690,10 +776,23 @@ def call_codex(spec, prompt, model, timeout):
 
 def call_gemini(spec, prompt, model, timeout):
     exe = find_exe(spec.get("command") or "gemini")
-    cmd = [exe, "--skip-trust", "-p", prompt]
+    # Prompt on stdin, never in argv: `gemini` is an npm .cmd shim on Windows,
+    # so an argv prompt would be cut at the first newline exactly like the
+    # 2026-07-26 codex incident (see argv_newline_truncation_risk).
+    # gemini-cli 0.42.0, bundle/gemini-QSTQ2DBG.js:16045 + 16084-16090:
+    #     let input = config.getQuestion();          // the -p value
+    #     if (!process.stdin.isTTY) {
+    #       stdinData = await readStdin();
+    #       if (stdinData) input = input ? `${stdinData}\n\n${input}` : stdinData;
+    #     }
+    # An empty -p is falsy there, so the stdin text becomes the prompt
+    # verbatim with nothing appended, and headless mode is still selected —
+    # chunk-7VVHSNDQ.js:245342 isHeadlessMode() returns true for non-TTY
+    # stdio, and again for a bare -p in argv.
+    cmd = [exe, "--skip-trust", "-p", ""]
     if model:
         cmd += ["-m", model]
-    rc, out, err, dur = run_cmd(cmd, timeout)
+    rc, out, err, dur = run_cmd(cmd, timeout, input_text=prompt)
     blob = out + err
     if "IneligibleTierError" in blob or "Error authenticating" in blob:
         return 55, "", (
@@ -905,12 +1004,28 @@ def call_claude(
     return rc, text, err, dur, usage, {}
 
 
+def call_agy(spec, prompt, model, timeout):
+    """Antigravity CLI (Google OAuth, Gemini family). It's an agentic CLI that
+    reads the working directory, so run it in an empty sandbox. Prompt goes via
+    argv (visible in the process list — never put secrets in the prompt)."""
+    sandbox = DATA_DIR / "agy-sandbox"
+    sandbox.mkdir(parents=True, exist_ok=True)
+    exe = Path(os.environ.get("LOCALAPPDATA", "")) / "agy" / "bin" / "agy.exe"
+    exe = str(exe) if exe.exists() else find_exe(spec.get("command") or "agy")
+    cmd = [exe, "-p", prompt, "--print-timeout", f"{max(30, timeout - 10)}s"]
+    if model:
+        cmd += ["--model", model]
+    rc, out, err, dur = run_cmd(cmd, timeout, cwd=str(sandbox))
+    return rc, out.strip(), err, dur, {}, {}
+
+
 # kind -> adapter for CLI providers
 CLI_ADAPTERS = {
     "claude": call_claude,
     "codex": call_codex,
     "grok": call_grok,
     "gemini": call_gemini,
+    "agy": call_agy,
     "generic": call_generic_cli,
 }
 
@@ -994,6 +1109,38 @@ def should_reject_suspicious_prompt(prompt, utf8_transport_verified=False):
     )
 
 
+def quota_gate_block_reason(provider_name, cache_path=QUOTA_CACHE, now=None):
+    """>80% 主窗口閘門(2026-08-01 拍板:檢查移進派工當下,不靠各 session 自律)。
+
+    回傳擋下原因字串;不該擋回 None。cache 缺失/損毀/過期(>QUOTA_CACHE_STALE_HOURS)
+    一律放行——用舊資料亂擋比放行更糟,額度保護以最新 probe 為準。
+    """
+    try:
+        cache = json.loads(Path(cache_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    try:
+        gen_dt = datetime.fromisoformat(cache.get("generated_at", ""))
+        ref = now or datetime.now(gen_dt.tzinfo)
+        if (ref - gen_dt).total_seconds() > QUOTA_CACHE_STALE_HOURS * 3600:
+            return None
+    except (TypeError, ValueError):
+        return None
+    for e in cache.get("entries", []):
+        if e.get("provider") != provider_name:
+            continue
+        if e.get("metric") not in QUOTA_GATE_METRICS:
+            continue
+        pct = e.get("used_percent")
+        if pct is not None and pct > QUOTA_GATE_PERCENT:
+            label = e.get("label") or e.get("metric")
+            return (
+                f"{provider_name} 的「{label}」已用 {pct}%(>{QUOTA_GATE_PERCENT}% 閘門)。"
+                f"先跑 quota_probe.py 確認最新用量,確定要派加 --ignore-quota"
+            )
+    return None
+
+
 def main():
     def positive_timeout(value):
         try:
@@ -1055,6 +1202,15 @@ def main():
         "--max-budget-usd", type=positive_float, default=None,
         help="Claude only: set the CLI's print-mode spend budget",
     )
+    ap.add_argument(
+        "--ignore-quota", action="store_true",
+        help="skip the >80% main-window quota gate (use after checking quota_probe.py)",
+    )
+    ap.add_argument(
+        "--allow-claude-in-session", action="store_true",
+        help="run a kind=claude provider even when CLAUDECODE=1 "
+             "(e.g. a detached scheduler that inherited the env)",
+    )
     args = ap.parse_args()
 
     if args.list:
@@ -1105,6 +1261,22 @@ def main():
     if claude_specific_requested and not is_claude_adapter:
         ap.error("Claude-specific options are only valid for a kind=claude provider")
 
+    if (
+        is_claude_adapter
+        and os.environ.get("CLAUDECODE") == "1"
+        and not args.allow_claude_in_session
+    ):
+        ap.error(
+            "偵測到 Claude Code session 內派 claude(CLAUDECODE=1):"
+            "對話內 claude -p 會 401/與本 session 搶佔,請改用 subagent/Workflow;"
+            "確定要跑(如 detached 排程)加 --allow-claude-in-session"
+        )
+
+    if not args.ignore_quota:
+        gate_reason = quota_gate_block_reason(args.provider)
+        if gate_reason:
+            ap.error(f"額度閘門:{gate_reason}")
+
     timeout = args.timeout or int(spec.get("default_timeout", 300))
 
     utf8_transport_verified = (
@@ -1137,6 +1309,13 @@ def main():
     else:
         ap.error(f"provider '{args.provider}' has unsupported type '{spec['type']}'")
 
+    ok = rc == 0 and bool(text)
+    # A reply that only complains about missing input is not a success, however
+    # clean the exit code was.
+    suspect = detect_empty_input_reply(prompt, text) if ok else ""
+    if suspect:
+        ok = False
+
     rec = {
         "ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "provider": args.provider,
@@ -1148,9 +1327,17 @@ def main():
         "usage": usage or None,
         "rate_snapshot": rate or None,
         "duration_s": round(dur, 1),
-        "ok": rc == 0 and bool(text),
-        "err": (err or "")[:500] if rc != 0 else None,
-        "err_kind": classify_err(err, rc) if rc != 0 else None,
+        "ok": ok,
+        "err": (
+            suspect[:500] if suspect
+            else (err or "")[:500] if rc != 0
+            else None
+        ),
+        "err_kind": (
+            "empty_input_reply" if suspect
+            else classify_err(err, rc) if rc != 0
+            else None
+        ),
         "rc": rc,
     }
     if is_claude_adapter:
@@ -1164,6 +1351,12 @@ def main():
 
     if rec["ok"]:
         print(text)
+    elif suspect:
+        # Show the reply so the operator can judge it, but exit non-zero so
+        # callers and the dashboard treat this as the failure it is.
+        print(f"[dispatch SUSPECT] {suspect}", file=sys.stderr)
+        print(text)
+        sys.exit(1)
     else:
         if (
             is_claude_adapter

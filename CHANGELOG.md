@@ -7,7 +7,38 @@
 
 源自用 ai-orchestra 自我審查（Grok 外部審查 + Claude 交叉查核）後的第一批改進。
 
+### Fixed
+
+- **Windows 上多行 prompt 會被靜默截斷（嚴重）** —— npm 安裝的 CLI 是 `.cmd`
+  包裝器，CreateProcess 會轉交 `cmd.exe`，而 `cmd.exe` 把換行當命令結束。
+  結果是模型只收到 prompt 的第一行、回覆「請貼上完整內容」，但 dispatch 仍
+  exit 0、記帳檔記 `ok=true`，**完全沒有徵兆**。實測 87 字元／4 行的 prompt
+  只有 17 字元送達。
+  - `codex` 轉接器改走 stdin（`codex exec --json -`）。
+  - `gemini` 轉接器改走 stdin（`gemini --skip-trust -p ""` + prompt 走 stdin）。
+    ⚠️ 依據是讀 gemini-cli 0.42.0 的原始碼（空的 `-p` 是 falsy，stdin 內容原封
+    不動成為 prompt），並用假的 `.cmd` 包裝器實測傳輸位元組相同；
+    但**尚未跑過一次真實模型回合**驗證。
+  - 新增 `argv_newline_truncation_risk()`，在 `run_cmd()` /
+    `run_streaming_json_cmd()` 前置檢查：`.cmd`／`.bat` + 參數含換行 → 回 `rc=-3`
+    明確報錯。往後新增的轉接器自動受保護。
+- **成功判定太寬鬆** —— `rc == 0 and text` 只證明行程正常結束，不證明模型收到
+  內容。新增 `detect_empty_input_reply()`：大 prompt 換來一個只在抱怨沒收到
+  輸入的短回覆時，記成 `ok=false`／`err_kind=empty_input_reply`／exit 1，
+  回覆仍印到 stdout 供人工判讀。三個門檻同時成立才觸發，避免誤殺「真的在請你
+  補資料」的長答案。
+- `classify_ledger_err()` 新增 `prompt_truncated` 與 `empty_input_reply` 兩個
+  分類桶，讓儀表板的「失敗原因」看得出根因，而不是落進「其他（未分類）」。
+
 ### Added
+- **`tests/test_dispatch_transport.py`** — 15 個回歸測試，釘住 codex／gemini 的
+  stdin 傳輸契約、`.cmd` 包裝器守門、以及「不要誤殺正常長答案」的邊界。
+- **`agy` 轉接器**（Antigravity CLI，Google OAuth／Gemini 家族）。它是 agentic
+  CLI 會主動讀工作目錄，所以固定在空沙盒目錄執行；`providers.example.toml`
+  已附範例區塊與兩個注意事項。
+- **派工前的額度閘門**：主窗口用量過高時當場擋下派工（`--ignore-quota` 可逃生），
+  以及 Claude Code session 內誤派 `claude` 的守門（`--allow-claude-in-session`
+  可逃生）—— 後者在對話內會 401 並與當前 session 搶佔。
 - **`prove.py`** — 回放／工作證明閘門：用本機檢查（跑指令＋比對 rc/輸出、
   檔案存在且非空、檔案含某字串、URL 回 2xx）證明宣稱，而不是再問一個模型。
   check 函式可被匯入；每次執行記進 ledger（provider `prove`）。

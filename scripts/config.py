@@ -57,7 +57,7 @@ LEDGER = DATA_DIR / "ledger.jsonl"
 #   xAI/Grok API, Together, OpenRouter, Fireworks, Perplexity, NVIDIA NIM,
 #   and local servers (Ollama, LM Studio, vLLM, llama.cpp).
 
-BUILTIN_CLI_KINDS = {"claude", "codex", "grok", "gemini", "generic"}
+BUILTIN_CLI_KINDS = {"claude", "codex", "grok", "gemini", "agy", "generic"}
 
 
 def _normalize(name: str, raw: dict) -> dict:

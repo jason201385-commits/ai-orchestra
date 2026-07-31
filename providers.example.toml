@@ -53,6 +53,19 @@ command = "gemini"
 role    = "second opinion"
 enabled = false
 
+# Antigravity CLI（Google OAuth，Gemini 家族）。
+# ⚠️ 兩個要知道的特性：
+#   1. 它是 agentic CLI，會主動讀「工作目錄」的內容 —— 轉接器因此固定在
+#      data/agy-sandbox 這個空目錄下執行它，避免它把你的專案讀進 prompt。
+#   2. 在 Git Bash 底下，它的輸出經過管線會被吃掉；一律走 dispatch.py
+#      或 PowerShell，不要自己 pipe。
+[providers.agy]
+type    = "cli"
+kind    = "agy"
+command = "agy"
+role    = "detail polish, design params, second opinion"
+enabled = false
+
 # 任何你喜歡的其他命令列 agent——通用 CLI 轉接器。
 # {prompt} 會被替換成你的 prompt。若省略 {prompt} 並設定
 # stdin = true，prompt 會改為透過管線送進工具的標準輸入。

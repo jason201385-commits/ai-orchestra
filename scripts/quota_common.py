@@ -421,6 +421,12 @@ def classify_ledger_err(err, rc=None):
     if not text or text.lower() in ("none", "null"):
         return "unrecorded"          # 舊紀錄沒存錯誤 — 誠實標「未記錄」
     low = text.lower()
+    # 這兩種是「送進去的 prompt 根本沒到模型」— 要在通用規則之前判,
+    # 否則會被下面的 "empty" / "not found" 規則吃掉,變成看不出根因。
+    if "replied as if the prompt was empty" in low:
+        return "empty_input_reply"
+    if "silently truncate" in low:
+        return "prompt_truncated"
     if "402" in low or "balance exhausted" in low or "payment required" in low:
         return "exhausted"
     if "429" in low or "rate limit" in low or "quota" in low or "usage limit" in low:
@@ -450,6 +456,8 @@ ERR_KIND_ZH = {
     "exe_missing": "找不到執行檔",
     "endpoint_changed": "端點變更",
     "empty_output": "回傳空內容",
+    "empty_input_reply": "模型說沒收到輸入(prompt 沒送到)",
+    "prompt_truncated": "prompt 在 argv 被截斷(.cmd shim)",
     "network": "網路錯誤",
     "unclassified": "其他(未分類)",
     "unrecorded": "未記錄(舊紀錄未存錯誤內容)",
