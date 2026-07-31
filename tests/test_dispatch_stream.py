@@ -83,9 +83,15 @@ class StreamingJsonCommandTests(unittest.TestCase):
         ))
 
     def test_question_mark_mojibake_fails_before_provider_call(self):
+        # --allow-claude-in-session is deliberate: dispatching `claude` from
+        # inside a Claude Code session is refused by an earlier guard, and this
+        # suite is normally run from inside one (the project ships as a Claude
+        # Code skill). Without the opt-out that guard preempts the check under
+        # test, and the failure reads like a mojibake regression that isn't one.
         garbled = "?? C:\\writing-agent\\AGENTS.md ... ??????"
         process = subprocess.run(
-            [sys.executable, dispatch.__file__, "claude", "--timeout", "5"],
+            [sys.executable, dispatch.__file__, "claude", "--timeout", "5",
+             "--allow-claude-in-session"],
             input=garbled,
             capture_output=True,
             text=True,
@@ -226,8 +232,14 @@ print(json.dumps({"type": "result", "result": str(len(data))}), flush=True)
     def test_timeout_kills_descendant_after_parent_exits(self):
         with tempfile.TemporaryDirectory() as tmp:
             ready_path = Path(tmp) / "descendant.pid"
+            # The child publishes its PID atomically: write to a temp file, then
+            # os.replace onto the handshake path. `write_text` alone creates the
+            # file *before* the content lands, so a parent polling exists() can
+            # read "" and blow up on int("") — this test used to fail that way
+            # roughly one run in four.
             child_code = f"""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -237,7 +249,10 @@ descendant = subprocess.Popen(
     stdout=sys.stdout,
     stderr=sys.stderr,
 )
-Path({str(ready_path)!r}).write_text(str(descendant.pid), encoding="ascii")
+ready = Path({str(ready_path)!r})
+staging = ready.with_suffix(".tmp")
+staging.write_text(str(descendant.pid), encoding="ascii")
+os.replace(staging, ready)
 print(json.dumps({{"type": "system", "subtype": "init", "model": "fake"}}), flush=True)
 """
             result = {}
@@ -249,17 +264,30 @@ print(json.dumps({{"type": "system", "subtype": "init", "model": "fake"}}), flus
                     provider="fake",
                 )
 
+            def published_pid():
+                """None until a complete PID is readable.
+
+                Readiness is "the content parses", not "the path exists".
+                OSError matters as much as ValueError here: on Windows a read
+                that races os.replace raises PermissionError, so treating only
+                ValueError as "not ready yet" would just trade one flake for
+                another.
+                """
+                try:
+                    return int(ready_path.read_text(encoding="ascii"))
+                except (OSError, ValueError):
+                    return None
+
             runner = threading.Thread(target=run_timeout_case)
             runner.start()
             ready_deadline = time.monotonic() + 2.5
-            while not ready_path.exists() and time.monotonic() < ready_deadline:
-                time.sleep(0.02)
+            descendant_pid = None
+            while descendant_pid is None and time.monotonic() < ready_deadline:
+                descendant_pid = published_pid()
+                if descendant_pid is None:
+                    time.sleep(0.02)
 
-            ready_seen = ready_path.exists()
-            descendant_pid = (
-                int(ready_path.read_text(encoding="ascii"))
-                if ready_seen else None
-            )
+            ready_seen = descendant_pid is not None
             descendant_was_running = (
                 process_is_running(descendant_pid) if descendant_pid else False
             )
