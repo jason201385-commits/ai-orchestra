@@ -60,7 +60,7 @@ CLAUDE_SESSIONS = APPDATA / "Claude" / "claude-code-sessions"
 CLAUDE_CREDS = Path.home() / ".claude" / ".credentials.json"
 GROK_LOG = Path.home() / ".grok" / "logs" / "unified.jsonl"
 
-ALL_PROVIDERS = ("claude", "codex", "grok", "gemini", "nim")
+ALL_PROVIDERS = ("claude", "codex", "grok", "agy", "gemini", "nim")
 
 # 撞牆事件只在這個窗口內採信 — 更早的事件早就重置了,拿出來講是誤導
 WALL_MAX_AGE_DAYS = 7
@@ -452,20 +452,34 @@ def probe_grok():
 # ══════════════════════════════════════════════════════════════════
 # AGY / GEMINI / NIM
 # ══════════════════════════════════════════════════════════════════
+def probe_agy():
+    return [make_entry(
+        "agy", "usage", label="Antigravity 用量", status="counted",
+        count=_ledger_count("agy"), text="近 7 日本地計數",
+        source="local-count", source_detail="ledger.jsonl",
+        note="已確認無查詢管道:quota_manager 只把配額留在記憶體,不寫 log",
+        fix="只能本地計數 — 這不是官方剩餘量",
+    )]
+
+
 def probe_gemini():
+    # 一把 GEMINI_API_KEY 同時餵舊 CLI(provider "gemini")與 OpenAI 相容的
+    # Google AI Studio 端點(provider "gemini_api"),所以計數要把兩邊加總,
+    # 否則改派 gemini_api 之後儀表板會顯示「都沒在用」。
+    count = _ledger_count("gemini") + _ledger_count("gemini_api")
     if os.environ.get("GEMINI_API_KEY"):
         return [make_entry(
-            "gemini", "usage", label="Gemini API", status="counted",
-            count=_ledger_count("gemini"), text="近 7 日本地計數",
+            "gemini", "usage", label="Gemini API / AI Studio", status="counted",
+            count=count, text="近 7 日本地計數(gemini + gemini_api)",
             source="local-count", source_detail="ledger.jsonl",
             note="有 API key,但 Google 未提供查詢剩餘配額的端點",
             fix="剩餘量只能到 aistudio.google.com/rate-limit 網頁看",
         )]
     return [make_entry(
-        "gemini", "usage", label="Gemini API", status="unknown",
+        "gemini", "usage", label="Gemini API / AI Studio", status="unknown",
         source="local-count", source_detail="env / gemini CLI", error_kind="auth",
         note="NOT CONFIGURED — 無 GEMINI_API_KEY,且 CLI OAuth 已失效(2026-07-16 起)",
-        fix="要用就設 GEMINI_API_KEY;在那之前不要把它排進分工表",
+        fix="設 GEMINI_API_KEY 後改派 gemini_api(OpenAI 相容端點);舊 gemini CLI 不必修",
     )]
 
 
@@ -536,7 +550,7 @@ def _ledger_count(provider, days=7):
 
 PROBES = {
     "claude": probe_claude, "codex": probe_codex, "grok": probe_grok,
-    "gemini": probe_gemini, "nim": probe_nim,
+    "agy": probe_agy, "gemini": probe_gemini, "nim": probe_nim,
 }
 
 

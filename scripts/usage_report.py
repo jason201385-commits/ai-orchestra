@@ -45,7 +45,7 @@ LEDGER = DATA_DIR / "ledger.jsonl"
 CACHE = DATA_DIR / "quota_cache.json"
 DASH = DATA_DIR / "dashboard.html"
 
-PROVIDER_ORDER = ["claude", "codex", "grok", "gemini", "nim"]
+PROVIDER_ORDER = ["claude", "codex", "grok", "agy", "gemini", "gemini_api", "nim"]
 
 # Claude 三軸的顯示順序 — 缺哪一軸就補一列「未知」,不讓它默默消失
 CLAUDE_AXES = [

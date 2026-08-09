@@ -1004,6 +1004,36 @@ def call_claude(
     return rc, text, err, dur, usage, {}
 
 
+def _agy_actual_model(prompt, t0):
+    """Best-effort: read the agy CLI's own log to learn which model the backend
+    actually served. agy resolves --model against the account's available list
+    and silently substitutes on miss (observed 2026-08-01: requested
+    gemini-3.1-pro-high, served "Gemini 3.6 Flash (High)") — so the requested
+    model is not proof of the served model. Each agy invocation writes its own
+    cli-*.log; we match ours by promptLength (UTF-8 bytes). Never raises."""
+    try:
+        logdir = Path.home() / ".gemini" / "antigravity-cli" / "log"
+        want = f"promptLength={len(prompt.encode('utf-8'))},"
+        for p in sorted(logdir.glob("cli-*.log"),
+                        key=lambda q: q.stat().st_mtime, reverse=True)[:8]:
+            if p.stat().st_mtime < t0 - 5:
+                break
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if want not in text:
+                continue
+            labels = re.findall(
+                r'Propagating selected model override to backend: label="([^"]+)"',
+                text)
+            if labels:
+                return labels[-1]
+        return None
+    except Exception:
+        return None
+
+
 def call_agy(spec, prompt, model, timeout):
     """Antigravity CLI (Google OAuth, Gemini family). It's an agentic CLI that
     reads the working directory, so run it in an empty sandbox. Prompt goes via
@@ -1015,8 +1045,22 @@ def call_agy(spec, prompt, model, timeout):
     cmd = [exe, "-p", prompt, "--print-timeout", f"{max(30, timeout - 10)}s"]
     if model:
         cmd += ["--model", model]
+    t0 = time.time()
     rc, out, err, dur = run_cmd(cmd, timeout, cwd=str(sandbox))
-    return rc, out.strip(), err, dur, {}, {}
+    rate = {}
+    actual = _agy_actual_model(prompt, t0)
+    if actual:
+        rate["agy_model_actual"] = actual
+        requested = (model or "").strip().lower()
+        normalized = re.sub(r"[^a-z0-9.]+", "-", actual.lower()).strip("-")
+        if requested and normalized != requested:
+            rate["agy_model_mismatch"] = True
+            print(
+                f"[dispatch WARN] agy substituted model: "
+                f'requested={model} actual="{actual}"',
+                file=sys.stderr,
+            )
+    return rc, out.strip(), err, dur, {}, rate
 
 
 # kind -> adapter for CLI providers

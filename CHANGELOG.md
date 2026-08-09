@@ -31,6 +31,22 @@
   分類桶，讓儀表板的「失敗原因」看得出根因，而不是落進「其他（未分類）」。
 
 ### Added
+- **`roundtable.py` ＋ `config/workflows.toml`** — 多 AI 討論流程引擎（圓桌／
+  辯論／二次意見／程式協作四個 preset）。三條硬規則寫進程式：平行角色必須
+  不同供應商、供應商出錯就停整個流程（錯誤絕不當答案傳給下一輪）、流程有
+  版本號且重播對不上就明確失敗。產出全文落地 `data/runs/`（不截斷）＋
+  `manifest.json` 稽核。附 `tests/test_roundtable_routing.py`。
+  靈感來源：teddashh/multi-ai-chat-desktop（MIT）——移植流程設計，不是程式碼。
+- **agy 靜默模型替換守門**（路由層靜默失敗防護）：`--model` 指定的模型不等於
+  後端實際服務的模型——consumer OAuth 拿不到的模型，agy 會**靜默 fallback**
+  （rc=0、回覆正常、不報錯）。`dispatch.py` 現在每次 agy 調用後讀 agy 自己的
+  CLI log（用 promptLength 配對本次呼叫，可區分平行調用），把實際模型寫進
+  ledger `rate_snapshot.agy_model_actual`；不符時標 `agy_model_mismatch` 並在
+  stderr 警告。調用不視為失敗——回覆是真的，只是模型不是要求的那顆。
+- **`probe_agy()`** — agy 進 `quota_probe.py` 的探測清單（本地計數；已確認
+  無官方查詢管道：quota_manager 只把配額留在記憶體，不寫 log）。
+- **`set_api_key.py` ＋ `設定API金鑰.bat`** — 把 API key 存成使用者環境變數的
+  安全入口：key 不進命令列（避開 shell 歷史檔與 process list）、不進任何檔案。
 - **`tests/test_dispatch_transport.py`** — 15 個回歸測試，釘住 codex／gemini 的
   stdin 傳輸契約、`.cmd` 包裝器守門、以及「不要誤殺正常長答案」的邊界。
 - **`agy` 轉接器**（Antigravity CLI，Google OAuth／Gemini 家族）。它是 agentic
@@ -65,6 +81,9 @@
 ### Fixed
 - `prove.py` / `verify.py` 不再於 import 時覆寫 `sys.stdout/stderr`（改成只在
   `main()` 內冪等設定），修掉互相 import 造成的雙重包裹與關閉期 I/O 錯誤。
+- Gemini 用量計數把 `gemini` 與 `gemini_api` 兩個 provider 加總（同一把
+  GEMINI_API_KEY），否則改派 `gemini_api` 之後儀表板會顯示「都沒在用」；
+  `usage_report.py` 的供應商排序補上 `agy` 與 `gemini_api`。
 
 ## [0.1.0] — 2026-07-21
 

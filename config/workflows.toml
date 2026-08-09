@@ -1,0 +1,54 @@
+# 多 AI 協作流程預設(2026-07-31 新增)
+#
+# 靈感來源:teddashh/multi-ai-chat-desktop(MIT)—— 它把「多 AI 討論」做成可重複的
+# preset 流程,而不是每次手拼 prompt。我們移植的是**流程設計與規則**,不是程式碼。
+#
+# 三條從那個專案學來的硬規則(已寫進 roundtable.py):
+#   1. 平行角色必須是不同供應商;序列角色可以重用同一家
+#   2. 供應商出錯就**停整個流程**,錯誤訊息絕不當成答案傳給下一輪
+#   3. 流程圖有版本號;快照/重播對不上版本就明確失敗,不要靜默換路由
+#
+# version 改了就代表流程語意變了 → 舊快照重播會被擋下。
+
+[roundtable]
+version = 2
+title = "對抗式圓桌"
+desc = "難題收斂:自由陳述 → 交叉對打 → 自我反駁 → 收斂 → 總結。實測能讓各家改變立場。"
+rounds = [
+  { name = "自由陳述", mode = "parallel", prompt = "【第{round}輪/共{total}輪 · 自由陳述】\n\n議題:{topic}\n\n{facts}\n\n你的角色:{role}\n\n請自由陳述立場,不要客套,可以直接反對現有方向。{limit}" },
+  { name = "交叉對打", mode = "parallel", prompt = "【第{round}輪/共{total}輪 · 交叉對打】\n\n議題:{topic}\n\n上一輪各家立場:\n{prior}\n\n你的角色:{role}\n\n直接回應另外幾家:你同意誰?反對誰?具體指出對方哪裡錯或沒想到。可以改變自己的立場(改了要說為什麼)。{limit}" },
+  { name = "自我反駁", mode = "parallel", prompt = "【第{round}輪/共{total}輪 · 自我反駁與盲點】\n\n議題:{topic}\n\n目前的共識與各家立場:\n{prior}\n\n你的角色:{role}\n\n**打自己的臉**:用最強的理由說明「為什麼目前的共識可能是錯的」。並指出還沒有人碰到的盲點。不要重複前幾輪講過的。{limit}" },
+  { name = "收斂", mode = "parallel", prompt = "【第{round}輪/共{total}輪 · 收斂】\n\n議題:{topic}\n\n前幾輪:\n{prior}\n\n你的角色:{role}\n\n給可執行的單一方案:①一句話結論 ②具體交付清單(3-5 件,照優先序)③明確放棄什麼 ④2 個 30 天內可量測的成功指標 ⑤對其他家的最後一句話。不要再論證,直接給結論。{limit}" },
+]
+# 第 5 輪(總結)由總指揮 Claude 做,不外派——外部 AI 只出意見,收斂裁決是 Claude 的工作。
+
+[debate]
+# v2(2026-07-31):single 輪次改為依 --roles 宣告順序輪流指派(舊版全部靜默派給第一家)
+version = 2
+title = "正反辯論"
+desc = "壓力測試一個決定:正方 → 反方 → 裁判 → 合成"
+rounds = [
+  { name = "正方", mode = "single", prompt = "【正方】議題:{topic}\n\n{facts}\n\n請提出**支持**這個方向的最強論證。具體、有依據,不要空話。{limit}" },
+  { name = "反方", mode = "single", prompt = "【反方】議題:{topic}\n\n{facts}\n\n正方主張:\n{prior}\n\n請提出**反對**的最強論證,直接攻擊正方的弱點。{limit}" },
+  { name = "裁判", mode = "single", prompt = "【裁判】議題:{topic}\n\n正反雙方:\n{prior}\n\n判定哪一方論證較強、各自最致命的漏洞是什麼。不要和稀泥。{limit}" },
+]
+
+[consult]
+version = 1
+title = "二次意見"
+desc = "研究/決策:兩家獨立作答 → 互審 → 最終答案"
+rounds = [
+  { name = "獨立作答", mode = "parallel", prompt = "問題:{topic}\n\n{facts}\n\n請獨立作答,不要假設別人會補充。每個事實宣稱要附出處或標「待驗證」。{limit}" },
+  { name = "互審", mode = "parallel", prompt = "問題:{topic}\n\n各家的答案:\n{prior}\n\n請審查上面的答案:哪些**事實錯誤**、哪些是**沒根據的推測**、缺了什麼。逐條指出。{limit}" },
+]
+
+[coding]
+# v2(2026-07-31):single 輪次改為依 --roles 宣告順序輪流指派(舊版全部靜默派給第一家)
+version = 2
+title = "程式協作"
+desc = "規格 → 審查 → 實作方向 → 驗收條件"
+rounds = [
+  { name = "規格", mode = "single", prompt = "需求:{topic}\n\n{facts}\n\n請寫出**實作規格**:輸入/輸出、邊界條件、失敗模式、不做什麼。{limit}" },
+  { name = "規格審查", mode = "parallel", prompt = "需求:{topic}\n\n規格草案:\n{prior}\n\n請找出規格的漏洞:沒想到的邊界、會靜默失敗的地方、過度設計的部分。{limit}" },
+  { name = "驗收條件", mode = "single", prompt = "需求:{topic}\n\n規格與審查意見:\n{prior}\n\n請寫出**可執行的驗收條件**:每條都要能用指令或測試證明,不接受「看起來正常」。{limit}" },
+]
