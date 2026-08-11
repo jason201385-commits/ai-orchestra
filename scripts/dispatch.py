@@ -1248,7 +1248,7 @@ def main():
     )
     ap.add_argument(
         "--ignore-quota", action="store_true",
-        help="skip the >80% main-window quota gate (use after checking quota_probe.py)",
+        help="skip the >80%% main-window quota gate (use after checking quota_probe.py)",
     )
     ap.add_argument(
         "--allow-claude-in-session", action="store_true",
