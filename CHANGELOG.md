@@ -9,6 +9,10 @@
 
 ### Fixed
 
+- **Python 3.14 起 `dispatch.py` 完全無法啟動** —— argparse 自 3.14 改在
+  `add_argument()` 時就驗證 help 字串，`--ignore-quota` 的 help 含未跳脫的 `%`，
+  每次執行直接 raise `ValueError: badly formed help string`。已改 `%%` 跳脫，
+  Python 3.14.2 實測 112 測試全綠。
 - **Windows 上多行 prompt 會被靜默截斷（嚴重）** —— npm 安裝的 CLI 是 `.cmd`
   包裝器，CreateProcess 會轉交 `cmd.exe`，而 `cmd.exe` 把換行當命令結束。
   結果是模型只收到 prompt 的第一行、回覆「請貼上完整內容」，但 dispatch 仍
