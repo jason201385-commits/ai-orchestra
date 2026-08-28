@@ -169,4 +169,7 @@ python .\scripts\record_outcome.py --provider claude `
 - timeout／空輸出：視為失敗，不把 partial output 重命名為成功。
 - critic 衝突：回到能裁決的檔案、primary source、命令或實際系統狀態。
 - 外部 provider 需要讀檔但工具面不穩：改送 inline minimal evidence packet。
+- URL evidence：現行 stdlib guard 會拒絕 credential、直接 non-public IP 與 redirect-to-private，
+  但 DNS 驗證與實際連線之間仍有 TOCTOU／rebinding 風險；不要在可接觸敏感內網的環境
+  自動執行不受信任 critic 提供的 URL。
 - production、寄信、付款、部署、刪除：即使 agent 建議，仍需要當下的明確授權。

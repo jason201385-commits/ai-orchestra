@@ -16,9 +16,10 @@
   狀態；過期 quota cache 的 auth／exhausted row 不再永久排除 provider。
 - **Custom provider fallback** —— family／general profile fallback 不會在 provider
   未設定 model 時替 custom CLI 發明不相干的 model id。
-- **URL evidence SSRF boundary** —— `prove.py` 現在拒絕 credential URL、localhost、
+- **URL evidence SSRF boundary（best effort）** —— `prove.py` 現在拒絕 credential URL、localhost、
   private／link-local／metadata／其他 non-public IP，以及 redirect 到這些目標；避免
-  `verify.py --check-evidence` 直接抓取 critic 建議的內網 URL。
+  `verify.py --check-evidence` 直接抓取 critic 建議的內網 URL。DNS resolve-to-connect
+  TOCTOU／rebinding 仍列為已知限制，不宣稱完整 SSRF isolation。
 - **Python 3.14 起 `dispatch.py` 完全無法啟動** —— argparse 自 3.14 改在
   `add_argument()` 時就驗證 help 字串，`--ignore-quota` 的 help 含未跳脫的 `%`，
   每次執行直接 raise `ValueError: badly formed help string`。已改 `%%` 跳脫，
