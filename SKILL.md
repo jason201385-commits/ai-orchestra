@@ -1,23 +1,33 @@
 ---
 name: ai-orchestra
 description: >-
-  把你所有的 AI 訂閱當成一個樂團來指揮。由一位總指揮（Claude
-  Code）將工作分派給你手上的每一個 AI 方案 —— Codex、Grok、Gemini，或任何
-  OpenAI 相容的 API（OpenAI、DeepSeek、Groq、OpenRouter、NVIDIA NIM、本機的
-  Ollama/LM Studio……）—— 全透過單一指令完成，每次調用都會記帳，並以一套
-  對抗式交叉查核把「模型都同意了」視為還不夠好。
-  當某項任務適合把工作拆分到多個模型時使用（研究、審查、
-  批量生成、第二意見），當你想把粗活從稀缺的總指揮額度上移開時使用，
-  或當你想透過接地 + 對抗式驗證來降低幻覺時使用。觸發詞：「multi-AI」、「dispatch to
-  grok/codex/gemini/deepseek」、「cross-check」、「verify this claim」、「AI usage」、
-  「how much quota left」。
+  Coordinate a Codex or Claude Code primary session, native subagents, and
+  external AI providers through task-specific delegation, parallel execution,
+  adversarial review, proof replay, usage accounting, quota visibility, and
+  evidence-aware routing. Use for multi-AI collaboration, AI delegation,
+  cross-provider checking, deep reviews, bulk work, or usage/quota reporting.
 ---
 
 # ai-orchestra —— 多 AI 派工與反幻覺
 
-一套零相依的工具組（Python 3.11+ 標準函式庫），讓一位總指揮
-可以把工作分派給你手上的每一個 AI 訂閱、為每次調用記帳，並以
-對抗方式交叉查核宣稱。完整文件放在 `docs/`。
+一套零相依的工具組（Python 3.11+ 標準函式庫）。目前的 Codex 或 Claude Code
+主任務是總指揮；native subagents 負責有界分工，外部 provider 負責跨供應商
+specialist／critic。最終整合、權限決策與完成宣稱永遠留在主任務。
+
+## Core contract
+
+1. 派工前固定 objective、deliverables、限制、authoritative evidence 與 done checks。
+2. 使用最小有效 roster；不要把同一個廣泛問題丟給所有模型投票。
+3. 每個 agent 都要有 bounded role、input／output contract、read／write boundary。
+4. 每個 external dispatch 都要有唯一 label、task category、timeout／retry／budget 邊界。
+5. 獨立工作才平行；依賴工作循序執行。
+6. 模型輸出是分析，不是證據；用檔案、指令、primary source、API 或 replay 查證。
+7. 未明確授權時，delegated agents 保持唯讀；不得修改 production、寄信或擴權。
+8. 一個跨供應商反方勝過多輪投票；總指揮不能兼任自己的獨立 critic。
+9. 最終回報 roster、證據、失敗／fallback、未驗證項目與 task-specific ledger delta。
+
+完整流程見 [docs/multi-agent-workflow.md](docs/multi-agent-workflow.md)；涉及事實或完成
+判定時，先完整閱讀 [docs/anti-hallucination.md](docs/anti-hallucination.md)。
 
 ## 首次設定
 
@@ -43,12 +53,16 @@ echo "PROMPT" | python scripts/dispatch.py <provider> [--label NAME] [--model M]
 # Check which providers are installed / keyed / ready (offline):
 python scripts/dispatch.py --doctor
 
+# Evidence/subscription/quota/reliability-aware recommendation (no dispatch):
+python scripts/route.py --task implementation --coordinator codex --needs-tools
+python scripts/route.py --task code_review --coordinator codex --role critic
+
 # Adversarially cross-check a claim; --check-evidence runs the named proof
 # (earns exit 0); --json for agents:
-echo "CLAIM" | python scripts/verify.py --critics <a,b> [--check-evidence] [--json]
+echo "CLAIM" | python scripts/verify.py --critics <different-provider> [--check-evidence] [--json]
 
 # Verify a whole answer: split into atomic claims, check each:
-cat answer.md | python scripts/verify.py --from-answer --splitter <p> --critics <a,b>
+cat answer.md | python scripts/verify.py --from-answer --splitter <p> --critics <different-provider>
 
 # Proof-of-work / replay gate — prove a claim with a LOCAL check, not an opinion:
 python scripts/prove.py --cmd "pytest -q" --expect-rc 0    # or --files / --url
@@ -57,13 +71,31 @@ python scripts/prove.py --cmd "pytest -q" --expect-rc 0    # or --files / --url
 python scripts/usage_report.py [--html]
 ```
 
-- **平行工作：** 在背景啟動多個 `dispatch.py`（Claude Code
-  Bash `run_in_background: true`）並收集結果。每次調用都會自行記帳。
+- **平行工作：** 優先使用目前 runtime 的 native collaboration；只有外部
+  cross-provider 工作才平行啟動 `dispatch.py`。相依工作不可平行。
 - **Claude 轉接器的額外功能：** `--claude-profile review`（唯讀的獨立
   審查方，遵守 repo 的 `AGENTS.md`）、`--effort`、`--max-budget-usd`。
-- **不要在 Claude Code 對話內部派工給 `claude`** —— 在那裡巢狀執行
-  `claude -p` 會回傳 401。請改用 subagent/Workflow；只在單純的 shell 中
-  才派工給 `claude`。
+- **不要用同 provider 的第二個 CLI process 模擬獨立性。** Native subagents
+  可增加覆蓋率，但 independent critic 必須來自不同模型家族。
+
+## 選擇執行路徑
+
+### Native collaboration 優先
+
+Codex 主任務使用 Codex native subagents；Claude Code 主任務使用 Claude Code
+subagents。把 repo inventory、UI／安全 audit、bounded implementation、測試等互不依賴
+工作拆開，只傳該角色需要的 context。
+
+### External provider
+
+需要跨供應商 specialist／critic、或必須留下 dispatcher ledger 時，才使用
+`dispatch.py`／Windows UTF-8 wrapper `dispatch.ps1`。外部 agent 預設唯讀，prompt
+只帶最小 evidence packet，不得含 secret、credential、完整 env dump 或不必要個資。
+
+### Single agent
+
+任務小、緊密耦合、規格已清楚，或獨立觀點不會改變結果時，保持 single-agent。
+不要為了看起來像 orchestra 而增加無效層級。
 
 ## 如何真正降低幻覺
 
@@ -80,13 +112,23 @@ python scripts/usage_report.py [--html]
 
 ## 標準作業流程
 
-1. **先檢查額度** —— `usage_report.py`；把工作從任何偏低的一家移開。
-2. **拆分與分派** —— 把粗活（翻譯、批量草稿、摘要）
-   送給便宜／免費的供應商；把總指揮留給需要判斷的部分。
-3. **交叉盤問** —— 讓一個*不同的*供應商或 subagent 攻擊
-   輸出；聚焦於事實、數字與來源。
-4. **以證據定案** —— 修正或附上證明，然後重新驗證。
-5. **檢視記帳檔** —— 確認多跑的那幾輪買到的是準確度，而不只是 token。
+1. **Preflight** —— 從目前 skill 目錄執行 `dispatch.py --doctor`／`--list`；
+   quota 影響路由時才跑 `quota_probe.py`。Ready 只是環境提示，不是登入或完成證明。
+2. **寫 dispatch matrix** —— 為每個角色固定 scope、forbidden scope、inputs、
+   output contract、done、write boundary、review method、timeout 與 retry policy。
+3. **Route** —— 非簡單派工先跑 `route.py`；`executor` 可留在目前 coordinator，
+   `critic` 必須排除 coordinator family。分數是 recommendation，不是 evidence。
+4. **Execute** —— safe independent tasks 平行；相依任務循序。每個外部派工傳
+   `--task` 與唯一 `--label`，大型審查只送最小 evidence packet。
+5. **Challenge** —— 使用一個跨供應商 adversarial reviewer，要求 disconfirming case
+   與可裁決證據；明確傳 `verify.py --critics <different-provider>`。
+6. **Prove and replay** —— 重讀 changed files、跑測試、檢查最終外部狀態。
+   `prove.py` 通過才支持完成宣稱；模型一致仍是 `UNVERIFIED`。
+7. **Integrate** —— 主任務裁決衝突，回報 accepted／rejected／unresolved findings、
+   測試、provider failures、fallback 與本次 ledger delta。
+8. **Record outcome carefully** —— 只有 deterministic proof 或明確人類驗收後，
+   才能用 `record_outcome.py` 記錄。現行 proof-label 尚未綁 artifact hash；label 必須唯一，
+   高風險 release 不可只靠這個 metadata 作最終 gate。
 
 ## 靜默失敗：`rc=0` 不是模型的工作證明
 

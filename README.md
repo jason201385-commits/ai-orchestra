@@ -2,8 +2,8 @@
 
 **把你所有的 AI 訂閱當成一個樂團來指揮 —— 並且不讓它們集體產生幻覺。**
 
-`ai-orchestra` 是一套小巧、零相依的工具組，讓一位總指揮（預設是 Claude Code）
-把工作分派給你已經在付費的每一個 AI 方案 —— Codex/ChatGPT、Grok、Gemini，
+`ai-orchestra` 是一套小巧、零相依的工具組，讓目前的主任務（Codex 或 Claude Code）
+擔任總指揮，把工作分派給 native subagents 與你已經在付費的 AI 方案 —— Codex/ChatGPT、Grok、Gemini，
 或任何 OpenAI 相容 API（OpenAI、DeepSeek、Groq、OpenRouter、Mistral、
 NVIDIA NIM、本地的 Ollama/LM Studio……）—— 全部透過**一個指令**，
 **每一次調用都記帳**，並內建一個**對抗式交叉查核**，把「模型都同意了」
@@ -30,6 +30,8 @@ NVIDIA NIM、本地的 Ollama/LM Studio……）—— 全部透過**一個指�
   會騙你：如果某個數字無法驗證，它會標示「未知」，而不是給你一個看起來很篤定的 0。
 - **反幻覺是設計的一部分。** 一個「單一對手」的 `verify.py` 交叉查核，要求證據，
   拒絕替「只是達成共識」蓋橡皮圖章。
+- **有界分工，而不是模型投票。** Native subagents 處理可平行的 repo 工作；跨供應商
+  critic 專門找反例；最終由測試、檔案、URL 或 browser replay 裁決。
 
 **零相依。** 純 Python 3.11+ 標準庫。沒有任何東西需要 `pip install`。
 
@@ -58,6 +60,25 @@ python scripts/dispatch.py --doctor     # CLI 在 PATH？key 有設？base_url �
 
 ## 使用
 
+### 標準 multi-agent workflow
+
+完整作法見 [docs/multi-agent-workflow.md](docs/multi-agent-workflow.md)。最短版本是：
+
+1. 先固定 objective、deliverables、權限邊界與 done checks。
+2. 可平行的 repo 子題優先交給目前產品的 native subagents。
+3. 需要外部 specialist／critic 時才走 dispatcher，且每一個 agent 都有不同的有界角色。
+4. 用一個跨供應商反方找破綻，不做多數決。
+5. 用 `prove.py` 與最終狀態 replay 驗收；模型自稱完成不算證據。
+
+需要 provider 建議時，可使用 evidence-aware router：
+
+```bash
+python scripts/route.py --task implementation --coordinator codex --needs-tools
+python scripts/route.py --task code_review --coordinator codex --role critic
+```
+
+Router 只做建議；它不會自行 dispatch，也不能證明 provider 已登入或任務已完成。
+
 ### 呼叫單一供應商
 
 ```bash
@@ -78,26 +99,27 @@ echo "..." | python scripts/dispatch.py openrouter --model anthropic/claude-sonn
 '把這段翻成英文：早安' | & .\scripts\dispatch.ps1 deepseek
 ```
 
-### 平行跑好幾個
+### 平行工作
 
-沒有特殊的 runner —— 這正是重點。從你的 shell（或從 Claude Code 的 Bash 工具，
-搭配 `run_in_background`）把每個 `dispatch.py` 丟到背景執行，然後收集結果。
-每一次調用都獨立替自己記帳。
+優先使用目前 Codex／Claude Code 的 native collaboration；只有跨供應商工作才從 shell
+平行啟動 `dispatch.py`。獨立工作才可平行，依賴前一步輸出的任務必須循序執行。
+每次 external dispatch 都要有唯一 label、穩定的 `--task` 分類、最小 evidence packet
+與明確 timeout／retry 規則。
 
 ### 交叉查核一個宣稱（反幻覺的部分）
 
-挑幾個你已啟用、要當作對手（審查方）的供應商（最好*不是*你的總指揮）：
+挑一個已啟用、而且與總指揮不同模型家族的供應商當對手（審查方）：
 
 ```bash
 echo "Postgres SERIALIZABLE isolation is implemented with two-phase locking" | \
-  python scripts/verify.py --critics codex,grok
+  python scripts/verify.py --critics <different-provider>
 ```
 
 每個對手（審查方）都被要求去**駁斥**這個宣稱，並指出那唯一一項能一槌定音的證據。
 因為這個宣稱是假的（Postgres 用的是可序列化快照隔離），一個正常運作的評審團會駁斥它：
 
 ```
-Tally: 0 supported · 2 refuted · 0 unsupported · 0 uncertain · 0 error
+Tally: 0 supported · 1 refuted · 0 unsupported · 0 uncertain · 0 error
 RESULT (exit 2): DO NOT SHIP AS-IS — a critic refuted the claim...
 ```
 
@@ -121,10 +143,8 @@ python scripts/prove.py --files src/a.py src/b.py         # 檔案存在且非�
 cat answer.md | python scripts/verify.py --from-answer --splitter codex --critics grok
 ```
 
-> 若沒有給 `--critics`，verify.py 會挑選那些已啟用、標了 `adversary = true`
-> 的供應商（沒有的話退回 `role` 含「review」的），一律排除總指揮。精簡過設定就
-> 明確傳 `--critics a,b`，
-> 或在某個供應商的 role 加上「review」。
+> 請明確傳 `--critics`。設定檔不知道目前總指揮是 Codex 或 Claude Code，無法可靠判斷
+> 跨供應商獨立性；同一模型家族的第二個 process 只能增加覆蓋率，不算獨立驗證。
 
 ### 看看你花了多少
 
@@ -173,13 +193,16 @@ ai-orchestra/
 ├─ scripts/
 │  ├─ dispatch.py              # call one provider (CLI or OpenAI-compatible)
 │  ├─ dispatch.ps1             # Windows PowerShell UTF-8 wrapper
+│  ├─ route.py                 # evidence/quota/reliability-aware recommendation
 │  ├─ verify.py                # adversarial cross-check (anti-hallucination)
+│  ├─ record_outcome.py        # record proof/human-backed local outcomes
 │  ├─ config.py                # loads providers.toml, resolves home/data dirs
 │  ├─ usage_report.py          # ledger-based usage table + HTML dashboard
 │  ├─ quota_probe.py           # OPTIONAL live-quota probe (best-effort)
 │  ├─ quota_common.py          # honest freshness/redaction primitives
 │  └─ statusline_quota.py      # OPTIONAL Claude Code statusline + quota export
-├─ docs/                       # anti-hallucination, providers, quota, architecture
+├─ config/routing_profiles.json # dated task weights and capability priors
+├─ docs/                       # workflow, routing evidence, providers, architecture
 ├─ tests/                      # self-checks
 └─ data/                       # local ledger & caches (gitignored)
 ```
@@ -191,6 +214,8 @@ ai-orchestra/
 - **誠實優先於完整。** 「未知」是一個有效、第一級的答案。絕不用一個看起來很篤定的 0
   去填補缺口。
 - **共識不等於真相。** 多個模型達成一致是一個假設，不是一次驗證。是證據在做驗證。
+- **總指揮不兼任自己的獨立 critic。** 同家族 subagents 是工作分工，不是外部佐證。
+- **路由是建議，proof 才是驗收。** Provider readiness、quota 與歷史成功率都只是排序訊號。
 - **一切都記帳。** 你無法對看不見的花費做推理。
 - **秘密只留在環境變數裡。** 絕不進設定檔、絕不進記錄檔、絕不進記帳檔、
   只要能避免就絕不進行程參數。
@@ -226,6 +251,7 @@ harry58892、mat.vmk3s_、jackyyyso** 以及其他人。謝謝你們。他們分
 
 **Conduct all your AI subscriptions like one orchestra — and stop them from hallucinating in unison.**
 
+- **One conductor in the current Codex or Claude Code session**, with native subagents for bounded parallel work and external providers for cross-provider specialist or critic roles.
 - **One interface for every plan** you already pay for (Codex/ChatGPT, Grok, Gemini, any OpenAI-compatible API), through one command.
 - **Honest metering** — every call is logged locally; unverifiable numbers say "unknown", never a confident zero.
 - **Anti-hallucination by design** — a one-adversary `verify.py` cross-check that demands evidence and refuses to rubber-stamp mere consensus.

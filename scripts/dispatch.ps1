@@ -12,6 +12,7 @@ param(
 
     [string]$Label = '',
     [string]$Model = '',
+    [string]$Task = '',
 
     [ValidateRange(1, 2147483647)]
     [int]$Timeout = 300,
@@ -60,6 +61,10 @@ end {
         if ($Model) {
             $arguments.Add('--model')
             $arguments.Add($Model)
+        }
+        if ($Task) {
+            $arguments.Add('--task')
+            $arguments.Add($Task)
         }
         if ($RetryNoResult) {
             $arguments.Add('--retry-no-result')

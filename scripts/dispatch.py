@@ -13,7 +13,7 @@ providers.example.toml). Two kinds are supported out of the box:
   * Any OpenAI-compatible HTTP API (OpenAI, DeepSeek, Groq, OpenRouter,
     NVIDIA NIM, local Ollama/LM Studio, ...)
 
-Every call is metered to data/ledger.jsonl (time, tokens, duration, ok/err).
+Every call is metered to data/ledger.jsonl (time, task, tokens, duration, ok/err).
 Secrets are read from environment variables and never written to disk or logs.
 """
 import argparse
@@ -79,6 +79,17 @@ def classify_err(err, rc=None) -> str:
         return classify_ledger_err(err, rc)
     except Exception:
         return "unclassified"
+
+
+def normalize_provider_result(rc, text, err):
+    """Turn silent empty-output success into an explicit dispatch failure."""
+    text = (text or "").strip()
+    err = (err or "").strip()
+    if rc == 0 and not text:
+        return 2, "", "provider returned empty output"
+    if rc != 0 and not err:
+        err = f"provider failed with rc={rc} and no error detail"
+    return rc, text, err
 
 
 # A provider can exit 0 with a well-formed reply that nonetheless proves the
@@ -1215,6 +1226,10 @@ def main():
     ap.add_argument("--label", default="")
     ap.add_argument("--model", default="")
     ap.add_argument(
+        "--task", default="",
+        help="stable task category for per-task reliability and outcome routing",
+    )
+    ap.add_argument(
         "--timeout", type=positive_timeout, default=None,
         help="total seconds for queue wait plus the first provider attempt "
              "(default: the provider's default_timeout, or 300)",
@@ -1336,6 +1351,8 @@ def main():
         )
 
     model = args.model or spec.get("model") or ""
+    if args.task and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", args.task):
+        ap.error("--task must be 1-80 characters: letters, digits, _ . : -")
 
     if is_claude_adapter:
         rc, text, err, dur, usage, rate = call_claude(
@@ -1353,6 +1370,7 @@ def main():
     else:
         ap.error(f"provider '{args.provider}' has unsupported type '{spec['type']}'")
 
+    rc, text, err = normalize_provider_result(rc, text, err)
     ok = rc == 0 and bool(text)
     # A reply that only complains about missing input is not a success, however
     # clean the exit code was.
@@ -1365,6 +1383,7 @@ def main():
         "provider": args.provider,
         "type": spec["type"],
         "label": args.label,
+        "task": args.task or None,
         "model": model or None,
         "prompt_chars": len(prompt),
         "output_chars": len(text),

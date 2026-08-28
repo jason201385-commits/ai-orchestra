@@ -18,8 +18,10 @@ Home directory resolution (first match wins):
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     import tomllib  # Python 3.11+
@@ -58,6 +60,7 @@ LEDGER = DATA_DIR / "ledger.jsonl"
 #   and local servers (Ollama, LM Studio, vLLM, llama.cpp).
 
 BUILTIN_CLI_KINDS = {"claude", "codex", "grok", "gemini", "agy", "generic"}
+BILLING_MODES = {"subscription", "free_credit", "metered_api", "local", "unknown"}
 
 
 def _normalize(name: str, raw: dict) -> dict:
@@ -71,6 +74,11 @@ def _normalize(name: str, raw: dict) -> dict:
         "type": ptype,
         "role": str(raw.get("role", "")),
         "enabled": bool(raw.get("enabled", True)),
+        # Coarse metadata for the evidence-aware router. These fields help it
+        # prefer already-paid capacity without inventing prices or balances.
+        "family": str(raw.get("family", name)).strip().lower() or name,
+        "billing": str(raw.get("billing", "unknown")).strip().lower(),
+        "routing_profile": str(raw.get("routing_profile", name)).strip() or name,
         # A non-positive timeout would crash the dispatcher — fall back to 300.
         "default_timeout": dt if dt > 0 else 300,
         "model": raw.get("model") or None,
@@ -78,6 +86,8 @@ def _normalize(name: str, raw: dict) -> dict:
         # legacy role~="review" heuristic).
         "adversary": bool(raw.get("adversary", False)),
     }
+    if spec["billing"] not in BILLING_MODES:
+        spec["billing"] = "unknown"
     if ptype == "cli":
         kind = str(raw.get("kind", "generic")).lower()
         if kind not in BUILTIN_CLI_KINDS:
@@ -140,6 +150,83 @@ def provider_names(only_enabled: bool = True) -> list:
     return sorted(
         n for n, s in provs.items() if (s.get("enabled", True) or not only_enabled)
     )
+
+
+def infer_provider_family(spec: dict) -> str:
+    """Infer the actual model family from non-secret provider metadata."""
+    kind = str(spec.get("kind") or "").lower()
+    if kind in ("claude", "codex", "gemini", "agy", "grok"):
+        return {
+            "claude": "anthropic",
+            "codex": "openai",
+            "gemini": "google",
+            "agy": "google",
+            "grok": "xai",
+        }[kind]
+
+    model = str(spec.get("model") or "").lower()
+    # OpenRouter/LiteLLM-style identifiers commonly namespace the model as
+    # "openai/gpt-*" or "anthropic/claude-*". Check both the full identifier
+    # and its final segment so a proxy cannot accidentally bypass the
+    # coordinator-family exclusion.
+    model_candidates = (model, model.rsplit("/", 1)[-1]) if model else ("",)
+    model_rules = (
+        (("claude",), "anthropic"),
+        (("gpt", "o1", "o3", "o4", "codex"), "openai"),
+        (("gemini", "gemma"), "google"),
+        (("grok",), "xai"),
+        (("minimax",), "minimax"),
+        (("meta/", "llama"), "meta"),
+    )
+    for prefixes, family in model_rules:
+        if any(candidate.startswith(prefix) for candidate in model_candidates for prefix in prefixes):
+            return family
+
+    host = (urlparse(str(spec.get("base_url") or "")).hostname or "").lower()
+    host_rules = (
+        ("anthropic", "anthropic"),
+        ("openai", "openai"),
+        ("x.ai", "xai"),
+        ("googleapis", "google"),
+        ("minimax", "minimax"),
+    )
+    for needle, family in host_rules:
+        if needle in host:
+            return family
+    return ""
+
+
+def check_provider_readiness(spec: dict) -> dict:
+    """Offline readiness gate shared by the doctor and router."""
+    if not spec.get("enabled", True):
+        return {"ready": False, "status": "skip", "note": "disabled in providers.toml"}
+
+    ptype = spec.get("type")
+    if ptype == "cli":
+        command = str(spec.get("command") or spec.get("name") or "")
+        found = shutil.which(command) or shutil.which(command + ".cmd") or shutil.which(command + ".exe")
+        if found:
+            return {"ready": True, "status": "OK", "note": f"{command} on PATH — ensure you're logged in"}
+        return {"ready": False, "status": "MISSING", "note": f"'{command}' not on PATH — install/login the CLI"}
+
+    if ptype == "openai":
+        base = str(spec.get("base_url") or "")
+        key_env = str(spec.get("api_key_env") or "")
+        model = str(spec.get("model") or "")
+        parsed = urlparse(base)
+        host = (parsed.hostname or "").lower()
+        is_local = host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost")
+        if not base:
+            return {"ready": False, "status": "BAD", "note": "base_url not set"}
+        if key_env and not os.environ.get(key_env):
+            return {"ready": False, "status": "NO KEY", "note": f"set env var {key_env}"}
+        if key_env and parsed.scheme != "https" and not is_local:
+            return {"ready": False, "status": "INSECURE", "note": "API key would use non-HTTPS base_url; use https or localhost"}
+        if not model:
+            return {"ready": False, "status": "BAD", "note": "model not configured"}
+        return {"ready": True, "status": "OK", "note": base + ("  (keyless local)" if not key_env else "")}
+
+    return {"ready": False, "status": "BAD", "note": f"unsupported type: {ptype}"}
 
 
 def config_source() -> Path:

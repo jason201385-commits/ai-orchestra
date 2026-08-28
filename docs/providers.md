@@ -22,10 +22,13 @@ cp providers.example.toml config/providers.toml
 
 ```toml
 [providers.codex]
-type    = "cli"
-kind    = "codex"        # claude | codex | grok | gemini | generic
-command = "codex"        # the executable name (or full path)
-role    = "independent reviewer"   # free-text; used by verify.py's defaults
+type            = "cli"
+kind            = "codex"        # claude | codex | grok | gemini | agy | generic
+command         = "codex"        # the executable name (or full path)
+role            = "coordinator or reviewer"  # human-readable note
+family          = "openai"       # independence boundary used by route.py
+billing         = "subscription" # subscription | free_credit | metered_api | local | unknown
+routing_profile = "codex"        # profile in config/routing_profiles.json
 enabled = true           # omit or true to enable; false to keep but skip
 default_timeout = 300    # seconds
 ```
@@ -34,10 +37,11 @@ default_timeout = 300    # seconds
 
 | `kind` | 適用於 | 說明 |
 |---|---|---|
-| `claude` | [Claude Code](https://claude.com/claude-code) | 專門打造：串流 JSON、唯讀的 `review` profile、plan 模式、`--effort`、`--max-budget-usd`、跨行程序列化。推薦的總指揮。 |
+| `claude` | [Claude Code](https://claude.com/claude-code) | 專門打造：串流 JSON、唯讀的 `review` profile、plan 模式、`--effort`、`--max-budget-usd`、跨行程序列化。 |
 | `codex` | OpenAI Codex CLI | 解析 `codex exec --json`，擷取 token 用量。 |
 | `grok` | xAI Grok CLI | 解析 `grok -p --output-format json`，失敗時退回純文字。 |
 | `gemini` | Google Gemini CLI | 偵測「ineligible tier / auth」這類失敗，並告訴你怎麼修。 |
+| `agy` | Google Antigravity CLI | 在隔離工作目錄呼叫，並以本機結果追蹤 headless surface 的實際可靠度。 |
 | `generic` | **任何其他 CLI** | 由你自行提供參數樣板——見下方。 |
 
 ### `generic` CLI 轉接器
@@ -164,17 +168,21 @@ extra_headers = { "HTTP-Referer" = "https://your-app.example", "X-Title" = "ai-o
 
 | 欄位 | 意義 |
 |---|---|
-| `adversary` | `true` = 明確把這個供應商設為 `verify.py` 的預設對手（審查方）。**優先於** `role` 子字串比對；只要有任何供應商標了 `adversary`，選擇就只看這個旗標。總指揮永遠不會被選為預設對手。 |
+| `adversary` | `true` = 將這個供應商列入 `verify.py` 的預設對手候選。設定檔不知道目前總指揮，正式查核仍應明確傳 `--critics`，排除同模型家族。 |
 | `role` | 自由文字的人看註記。若沒有任何供應商標 `adversary`，`verify.py` 會退回到「role 含有 `review`」的舊啟發式來挑對手。 |
 | `enabled` | `false` 會保留該區塊，但讓該供應商在你翻回來之前無法使用。 |
 | `default_timeout` | 秒數；可用 `--timeout` 逐次呼叫覆寫（設 `0` 或負數會自動回退成 300）。 |
 | `model` | 預設模型；可用 `--model` 逐次呼叫覆寫。 |
+| `family` | Provider／model family 的聲明值；`route.py` 會再依 kind、model id 與 host 推斷，避免用錯誤 metadata 假裝跨供應商獨立。 |
+| `billing` | 粗略的容量來源：`subscription`、`free_credit`、`metered_api`、`local` 或 `unknown`。不是價格或剩餘額度。 |
+| `routing_profile` | `config/routing_profiles.json` 內的能力 prior。找不到時，router 會依 family 或 conservative general profile fallback，並在輸出揭露。 |
 
 ## 驗證你的設定
 
 ```bash
 python scripts/dispatch.py --list     # 列出每個供應商、型別、啟用狀態
 python scripts/dispatch.py --doctor   # 離線檢查：CLI 在 PATH？key 有設？base_url 安全？
+python scripts/route.py --task code_review --coordinator codex --role critic
 python scripts/config.py              # 同上，並顯示解析後的 home/data 路徑
 ```
 
@@ -183,3 +191,6 @@ python scripts/config.py              # 同上，並顯示解析後的 home/data
 ```bash
 echo "hello" | python scripts/dispatch.py <name>
 ```
+
+`--doctor` 不會登入 provider，也不會證明模型可用；只有實際 dispatch 的可用輸出與
+ledger result 能證明該次呼叫成功。Quota unknown 必須保持 unknown。

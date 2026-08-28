@@ -18,10 +18,8 @@ Usage:
     python verify.py --claim "..." --critics codex --json       # machine-readable
 
 Each critic runs through dispatch.py (in parallel), so every check is metered in
-the ledger and honours your provider config. Critics default to enabled
-providers marked `adversary = true` (or, for back-compat, whose role mentions
-"review"), always excluding the coordinator for independence; override
-with --critics.
+the ledger and honours your provider config. Always pass --critics explicitly:
+the config file cannot know whether the current coordinator is Codex or Claude.
 
 With --check-evidence, each critic's named EVIDENCE_SPEC (a file/url, or with
 --run-commands a shell command) is actually executed — that is the ONLY way to
@@ -103,10 +101,11 @@ FLAWS:
 
 
 def default_critics(providers: dict) -> list:
-    """Pick independent adversaries. Prefer providers explicitly marked
-    `adversary = true`; fall back to the old role~="review" heuristic only if
-    none are marked. The coordinator is never a default critic — an adversary
-    that is the same model producing the claim isn't independent."""
+    """Pick configured adversary candidates when --critics was omitted.
+
+    This compatibility fallback cannot infer the current coordinator. Callers
+    that need cross-provider independence must pass --critics explicitly.
+    """
     enabled = {n: s for n, s in providers.items() if s.get("enabled", True)}
     explicit = sorted(
         n for n, s in enabled.items()
@@ -126,6 +125,7 @@ def run_critic(name: str, prompt: str, timeout: int) -> tuple:
     try:
         p = subprocess.run(
             [sys.executable, str(DISPATCH), name, "--label", "verify",
+             "--task", "adversarial_review",
              "--timeout", str(timeout)],
             input=prompt.encode("utf-8"),
             capture_output=True,

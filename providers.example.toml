@@ -20,13 +20,16 @@
 
 # ===== CLI 訂閱（已登入的命令列工具） ===========
 
-# Claude Code — 推薦的總指揮／審查方。專用轉接器：
-# 串流 JSON、唯讀「review」設定檔、plan-mode、預算控制。
+# Claude Code。當目前總指揮不是 Claude 時，可作跨供應商獨立審查方。
+# 專用轉接器支援串流 JSON、唯讀 review profile、effort 與預算上限。
 [providers.claude]
-type    = "cli"
-kind    = "claude"
-command = "claude"
-role    = "coordinator, reviewer, fact-check"
+type            = "cli"
+kind            = "claude"
+command         = "claude"
+role            = "coordinator, reviewer, fact-check"
+family          = "anthropic"
+billing         = "subscription"
+routing_profile = "claude"
 
 # OpenAI Codex CLI（ChatGPT 訂閱）。
 # adversary = true → verify.py 預設會拿它當交叉查核的對手（獨立於總指揮 claude）。
@@ -36,6 +39,9 @@ kind      = "codex"
 command   = "codex"
 role      = "independent reviewer, design"
 adversary = true
+family    = "openai"
+billing   = "subscription"
+routing_profile = "codex"
 
 # xAI Grok CLI（grok.com 訂閱）。
 [providers.grok]
@@ -43,6 +49,9 @@ type    = "cli"
 kind    = "grok"
 command = "grok"
 role    = "web-culture, copy, second opinion"
+family  = "xai"
+billing = "subscription"
+routing_profile = "grok"
 enabled = false   # 安裝並登入 CLI 後改成 true
 
 # Google Gemini CLI。
@@ -51,6 +60,9 @@ type    = "cli"
 kind    = "gemini"
 command = "gemini"
 role    = "second opinion"
+family  = "google"
+billing = "subscription"
+routing_profile = "gemini"
 enabled = false
 
 # Antigravity CLI（Google OAuth，Gemini 家族）。
@@ -64,6 +76,9 @@ type    = "cli"
 kind    = "agy"
 command = "agy"
 role    = "detail polish, design params, second opinion"
+family  = "google"
+billing = "subscription"
+routing_profile = "agy"
 enabled = false
 
 # 任何你喜歡的其他命令列 agent——通用 CLI 轉接器。
@@ -148,6 +163,9 @@ base_url    = "https://integrate.api.nvidia.com/v1"
 api_key_env = "NVIDIA_API_KEY"
 model       = "meta/llama-3.3-70b-instruct"
 role        = "bulk drafts, translation, summarization"
+billing     = "free_credit"
+family      = "meta"
+routing_profile = "nim"
 enabled     = false
 
 # ── 本機，不需 key ────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for prove.py check primitives (no network: uses python -c and temp
-files). check_url is exercised only for its scheme guard."""
+"""Tests for prove.py check primitives without external network access."""
 import sys
 import tempfile
 import unittest
@@ -66,6 +65,23 @@ class CheckUrlSchemeTests(unittest.TestCase):
         self.assertIn("http/https", detail)
         ok, detail = prove.check_url("ftp://example.com/x")
         self.assertFalse(ok)
+
+    def test_rejects_local_and_private_targets(self):
+        for url in (
+            "http://localhost/admin",
+            "http://127.0.0.1/admin",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/admin",
+        ):
+            with self.subTest(url=url):
+                ok, detail = prove.check_url(url)
+                self.assertFalse(ok)
+                self.assertTrue("local" in detail or "non-public" in detail)
+
+    def test_rejects_credential_bearing_url(self):
+        ok, detail = prove.check_url("https://user:password@example.com/")
+        self.assertFalse(ok)
+        self.assertIn("credential", detail)
 
 
 if __name__ == "__main__":

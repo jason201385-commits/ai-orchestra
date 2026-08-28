@@ -1,0 +1,182 @@
+{
+  "schema": 1,
+  "as_of": "2026-08-28",
+  "scale": "Capability priors use a coarse curator scale: 5=primary fit supported by official positioning plus empirical signal, 4=strong general fit, 3=usable generalist, 2=surface-limited, 1=poor fit, 0=unsupported. They are routing hints, not benchmark scores.",
+  "method": "Blend evidence-backed capability priors with configured billing mode, fresh quota state, local dispatch reliability and verified local outcomes. Never treat vendor claims or model popularity as proof of task completion.",
+  "sources": {
+    "openai_official": {
+      "kind": "official",
+      "url": "https://developers.openai.com/api/docs/guides/latest-model",
+      "claim": "GPT-5.6 offers Sol for frontier capability, Terra for balance, Luna for high-volume efficiency, and explicit reasoning effort controls."
+    },
+    "openai_codex_official": {
+      "kind": "official",
+      "url": "https://developers.openai.com/api/docs/models/gpt-5-codex",
+      "claim": "Codex-family models are optimized for agentic coding."
+    },
+    "anthropic_official": {
+      "kind": "official",
+      "url": "https://platform.claude.com/docs/en/about-claude/models/overview",
+      "claim": "Claude model tiers cover long-running agents, complex agentic coding, balanced speed/intelligence, reasoning, long context and multilingual work."
+    },
+    "google_official": {
+      "kind": "official",
+      "url": "https://ai.google.dev/gemini-api/docs/latest-model",
+      "claim": "Gemini 3.7 Flash is a workhorse for coding and agents and is the default model for the Antigravity agent."
+    },
+    "google_long_context_official": {
+      "kind": "official",
+      "url": "https://ai.google.dev/gemini-api/docs/long-context",
+      "claim": "Gemini supports long-context and native multimodal input; long context still has retrieval, latency and cost tradeoffs."
+    },
+    "grok_official": {
+      "kind": "official",
+      "url": "https://docs.x.ai/developers/models",
+      "claim": "Grok 4.6 targets code and agentic tool use; current events require Web Search or X Search."
+    },
+    "nvidia_official": {
+      "kind": "official",
+      "url": "https://docs.nvidia.com/nim/large-language-models/latest/get-started/index.html",
+      "claim": "NVIDIA hosts Llama 3.3 70B Instruct through NIM."
+    },
+    "minimax_official": {
+      "kind": "official",
+      "url": "https://www.minimax.io/news/minimax-m27-en",
+      "claim": "MiniMax M2.7 targets agent harnesses, software engineering and office-document work."
+    },
+    "terminal_bench": {
+      "kind": "independent_benchmark",
+      "url": "https://www.tbench.ai/leaderboard/terminal-bench/2.0",
+      "claim": "Reproducible terminal tasks show that both model and agent harness materially affect coding-agent outcomes."
+    },
+    "arena_agent": {
+      "kind": "community_empirical",
+      "url": "https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset",
+      "claim": "Agent Arena aggregates user-observed outcomes and preferences; it is a directional signal, not a task-specific proof."
+    },
+    "local_ledger": {
+      "kind": "local_empirical",
+      "path": "data/ledger.jsonl",
+      "claim": "Actual dispatch success, error class and latency on this machine."
+    },
+    "local_outcomes": {
+      "kind": "local_verified_outcomes",
+      "path": "data/outcomes.jsonl",
+      "claim": "Human or deterministic task verdicts recorded after replayable checks."
+    }
+  },
+  "tasks": {
+    "implementation": {
+      "label": "程式實作",
+      "weights": {"agentic_coding": 5, "tool_use": 5, "reasoning": 3, "code_review": 1}
+    },
+    "code_review": {
+      "label": "程式碼審查",
+      "weights": {"code_review": 5, "adversarial_review": 4, "reasoning": 4, "long_context": 1}
+    },
+    "architecture": {
+      "label": "架構與系統設計",
+      "weights": {"reasoning": 5, "long_context": 3, "adversarial_review": 3, "tool_use": 2}
+    },
+    "factual_research": {
+      "label": "有來源的事實研究",
+      "weights": {"reasoning": 4, "current_web": 3, "long_context": 3, "adversarial_review": 3}
+    },
+    "current_web": {
+      "label": "即時網路與社群情報",
+      "weights": {"current_web": 5, "reasoning": 3, "social_voice": 2}
+    },
+    "long_context": {
+      "label": "長內容綜整",
+      "weights": {"long_context": 5, "reasoning": 3, "translation": 1}
+    },
+    "multimodal": {
+      "label": "圖片影音與 PDF 理解",
+      "weights": {"multimodal": 5, "long_context": 3, "reasoning": 2}
+    },
+    "design": {
+      "label": "UI、視覺與設計判斷",
+      "weights": {"design_judgment": 5, "multimodal": 3, "reasoning": 2}
+    },
+    "copy_social": {
+      "label": "社群文案與文化語感",
+      "weights": {"social_voice": 5, "current_web": 3, "design_judgment": 2}
+    },
+    "bulk_text": {
+      "label": "大量文字批次",
+      "weights": {"bulk_efficiency": 5, "translation": 2, "reasoning": 1}
+    },
+    "office_docs": {
+      "label": "Word、Excel、PPT 與商務產出",
+      "weights": {"office_artifacts": 5, "reasoning": 3, "long_context": 2}
+    },
+    "translation": {
+      "label": "翻譯與在地化",
+      "weights": {"translation": 5, "long_context": 2, "bulk_efficiency": 2}
+    },
+    "adversarial_review": {
+      "label": "獨立反方審查",
+      "weights": {"adversarial_review": 5, "reasoning": 4, "code_review": 3}
+    }
+  },
+  "profiles": {
+    "codex": {
+      "family": "openai",
+      "prior_basis": "Official agentic-coding specialization and tier guidance; Terminal-Bench is used only as a harness-sensitive directional check.",
+      "capabilities": {"agentic_coding": 5, "code_review": 5, "reasoning": 5, "long_context": 4, "multimodal": 4, "current_web": 3, "social_voice": 3, "design_judgment": 5, "bulk_efficiency": 4, "office_artifacts": 4, "translation": 4, "adversarial_review": 4, "tool_use": 5},
+      "model_hints": {"quality": "gpt-5.6-sol", "balanced": "gpt-5.6-terra", "economy": "gpt-5.6-luna"},
+      "evidence": ["openai_official", "openai_codex_official", "terminal_bench", "arena_agent", "local_ledger"]
+    },
+    "claude": {
+      "family": "anthropic",
+      "prior_basis": "Official complex agentic coding, long-context and reasoning positioning; independent agent benchmarks support use as a critic without fixing an exact rank.",
+      "capabilities": {"agentic_coding": 5, "code_review": 5, "reasoning": 5, "long_context": 5, "multimodal": 4, "current_web": 2, "social_voice": 4, "design_judgment": 4, "bulk_efficiency": 3, "office_artifacts": 5, "translation": 5, "adversarial_review": 5, "tool_use": 5},
+      "model_hints": {"quality": "opus", "balanced": "sonnet", "economy": "sonnet"},
+      "evidence": ["anthropic_official", "terminal_bench", "arena_agent", "local_ledger"]
+    },
+    "grok": {
+      "family": "xai",
+      "prior_basis": "Official coding/tool-use positioning and explicit search requirement for current events; Arena is a broad user-outcome signal.",
+      "capabilities": {"agentic_coding": 4, "code_review": 3, "reasoning": 4, "long_context": 4, "multimodal": 4, "current_web": 5, "social_voice": 5, "design_judgment": 4, "bulk_efficiency": 3, "office_artifacts": 3, "translation": 4, "adversarial_review": 4, "tool_use": 4},
+      "model_hints": {"quality": "grok-4.6", "balanced": "grok-4.6", "economy": "grok-4.6"},
+      "evidence": ["grok_official", "arena_agent", "local_ledger"]
+    },
+    "agy": {
+      "family": "google",
+      "prior_basis": "Gemini capability priors are reduced where the local headless AGY surface cannot reliably exercise tools or multimodal inputs; local ledger governs availability.",
+      "capabilities": {"agentic_coding": 4, "code_review": 4, "reasoning": 4, "long_context": 5, "multimodal": 2, "current_web": 2, "social_voice": 3, "design_judgment": 5, "bulk_efficiency": 5, "office_artifacts": 4, "translation": 5, "adversarial_review": 4, "tool_use": 2},
+      "model_hints": {"quality": "gemini-3.1-pro-high", "balanced": "gemini-3.7-flash-high", "economy": "gemini-3.7-flash-low"},
+      "task_models": {"bulk_text": "gemini-3.7-flash-low", "design": "gemini-3.1-pro-high", "long_context": "gemini-3.7-flash-high", "multimodal": "gemini-3.7-flash-high"},
+      "constraints": {"inline_context_preferred": true, "tool_permission_flaky": true},
+      "evidence": ["google_official", "google_long_context_official", "arena_agent", "local_ledger"]
+    },
+    "gemini": {
+      "family": "google",
+      "prior_basis": "Official long-context and multimodal positioning; actual CLI authentication, model access and local outcomes still govern availability.",
+      "capabilities": {"agentic_coding": 4, "code_review": 4, "reasoning": 4, "long_context": 5, "multimodal": 5, "current_web": 3, "social_voice": 3, "design_judgment": 4, "bulk_efficiency": 5, "office_artifacts": 4, "translation": 5, "adversarial_review": 4, "tool_use": 4},
+      "model_hints": {"quality": "gemini-3.1-pro", "balanced": "gemini-3.7-flash", "economy": "gemini-3.7-flash"},
+      "evidence": ["google_official", "google_long_context_official", "arena_agent", "local_ledger"]
+    },
+    "nim": {
+      "family": "meta",
+      "prior_basis": "The configured Llama 3.3 70B text endpoint is treated as a bulk generalist; no frontier-agent capability is inferred from NIM hosting alone.",
+      "capabilities": {"agentic_coding": 2, "code_review": 3, "reasoning": 3, "long_context": 3, "multimodal": 1, "current_web": 0, "social_voice": 3, "design_judgment": 2, "bulk_efficiency": 5, "office_artifacts": 3, "translation": 4, "adversarial_review": 3, "tool_use": 2},
+      "model_hints": {"quality": "meta/llama-3.3-70b-instruct", "balanced": "meta/llama-3.3-70b-instruct", "economy": "meta/llama-3.3-70b-instruct"},
+      "evidence": ["nvidia_official", "local_ledger"]
+    },
+    "minimax": {
+      "family": "minimax",
+      "prior_basis": "Official M2.7 agent/software/office positioning, discounted because current independent signals are broad and this configured surface is metered text API.",
+      "capabilities": {"agentic_coding": 4, "code_review": 3, "reasoning": 4, "long_context": 4, "multimodal": 1, "current_web": 1, "social_voice": 4, "design_judgment": 4, "bulk_efficiency": 4, "office_artifacts": 5, "translation": 4, "adversarial_review": 3, "tool_use": 4},
+      "model_hints": {"quality": "MiniMax-M2.7", "balanced": "MiniMax-M2.7", "economy": "MiniMax-M2.7"},
+      "evidence": ["minimax_official", "terminal_bench", "arena_agent", "local_ledger"]
+    },
+    "general": {
+      "family": "other",
+      "prior_basis": "Conservative fallback for a configured provider without a curated family profile; local reliability and verified outcomes should dominate after enough evidence exists.",
+      "capabilities": {"agentic_coding": 3, "code_review": 3, "reasoning": 3, "long_context": 3, "multimodal": 1, "current_web": 1, "social_voice": 3, "design_judgment": 2, "bulk_efficiency": 3, "office_artifacts": 3, "translation": 3, "adversarial_review": 3, "tool_use": 2},
+      "model_hints": {},
+      "evidence": ["local_ledger"]
+    }
+  }
+}

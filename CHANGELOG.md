@@ -9,6 +9,16 @@
 
 ### Fixed
 
+- **跨家族 critic 判定** —— `infer_provider_family()` 現在辨識
+  `openai/gpt-*`、`anthropic/claude-*` 等 namespaced model id，避免透過代理端點
+  把同家族模型誤當獨立 reviewer。
+- **Stale proof／quota replay** —— `record_outcome.py` 只接受同 label 的最新 proof
+  狀態；過期 quota cache 的 auth／exhausted row 不再永久排除 provider。
+- **Custom provider fallback** —— family／general profile fallback 不會在 provider
+  未設定 model 時替 custom CLI 發明不相干的 model id。
+- **URL evidence SSRF boundary** —— `prove.py` 現在拒絕 credential URL、localhost、
+  private／link-local／metadata／其他 non-public IP，以及 redirect 到這些目標；避免
+  `verify.py --check-evidence` 直接抓取 critic 建議的內網 URL。
 - **Python 3.14 起 `dispatch.py` 完全無法啟動** —— argparse 自 3.14 改在
   `add_argument()` 時就驗證 help 字串，`--ignore-quota` 的 help 含未跳脫的 `%`，
   每次執行直接 raise `ValueError: badly formed help string`。已改 `%%` 跳脫，
@@ -35,6 +45,18 @@
   分類桶，讓儀表板的「失敗原因」看得出根因，而不是落進「其他（未分類）」。
 
 ### Added
+- **Runtime-aware multi-agent workflow** — Codex 或 Claude Code 主任務擔任
+  coordinator，native subagents 處理有界平行工作，跨供應商 provider 擔任
+  specialist／critic；完整 dispatch matrix、evidence packet、failure／fallback 與
+  replay 規則見 `docs/multi-agent-workflow.md`。
+- **`route.py` ＋ `config/routing_profiles.json`** — 依 task capability prior、
+  billing mode、新鮮 quota、本機 reliability 與已驗證 outcome 提供唯讀路由建議；
+  自訂 provider 沒有專屬 profile 時會揭露 family／general fallback。
+- **`record_outcome.py`** — 僅接受 proof-label 或明確 human acceptance 的 local
+  outcome metadata，供未來 routing prior 使用。現行 label 尚未 artifact-bound，
+  不可取代高風險 release gate。
+- `dispatch.py --task`／PowerShell `dispatch.ps1 -Task` — 將穩定任務分類寫入
+  ledger，讓 reliability 可按 task 統計。
 - **`roundtable.py` ＋ `config/workflows.toml`** — 多 AI 討論流程引擎（圓桌／
   辯論／二次意見／程式協作四個 preset）。三條硬規則寫進程式：平行角色必須
   不同供應商、供應商出錯就停整個流程（錯誤絕不當答案傳給下一輪）、流程有
@@ -77,6 +99,10 @@
   過去缺的測試（判定解析、退出碼矩陣、證據掙 exit 0、對手選擇、prove 原語）。
 
 ### Changed
+- Skill 與 README 不再把 Claude Code 寫死為預設總指揮；目前 Codex／Claude Code
+  runtime 都優先使用自己的 native collaboration，同家族 process 不算獨立查核。
+- 正式查核要求明確傳 `verify.py --critics <different-provider>`；模型一致仍不能
+  取代 deterministic proof。
 - `verify.py` 的對手改為**平行**執行（先前為序列，是純粹的延遲成本）。
 - 退出碼決策抽成純函式 `synthesize()`，可測試、可被 `--json` 重用。
 - **退出碼語意**：exit 0 從「永不出現」改為「唯有 `--check-evidence` 且證據

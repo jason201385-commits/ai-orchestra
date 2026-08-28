@@ -142,7 +142,8 @@ class StreamingJsonCommandTests(unittest.TestCase):
                 "$prompt = [Text.Encoding]::UTF8.GetString("
                 f"[Convert]::FromBase64String('{encoded}'))\n"
                 f"$prompt | & '{wrapper}' claude "
-                f"-DispatchPath '{fake_dispatch}' -Timeout 5 -MaxBudgetUsd 0.25\n"
+                f"-DispatchPath '{fake_dispatch}' -Timeout 5 -Task code_review "
+                "-MaxBudgetUsd 0.25\n"
                 "exit $LASTEXITCODE\n",
                 encoding="utf-8-sig",
             )
@@ -166,6 +167,8 @@ class StreamingJsonCommandTests(unittest.TestCase):
         self.assertEqual(received["verified"], "1")
         budget_index = received["args"].index("--max-budget-usd")
         self.assertEqual(received["args"][budget_index + 1], "0.25")
+        task_index = received["args"].index("--task")
+        self.assertEqual(received["args"][task_index + 1], "code_review")
 
     @unittest.skipUnless(
         sys.platform == "win32" and shutil.which("powershell.exe"),

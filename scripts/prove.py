@@ -24,8 +24,10 @@ return (ok: bool, detail: str), so verify.py can run a critic's named evidence.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import io
 import json
+import socket
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -118,16 +120,64 @@ def check_file_contains(path, substring):
     return False, f"{path} does not contain {substring!r}"
 
 
+def _validate_public_url(url):
+    """Reject local/private targets before fetching model-suggested evidence."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False, "only http/https URLs are allowed"
+    if not parsed.hostname:
+        return False, "URL must include a hostname"
+    if parsed.username is not None or parsed.password is not None:
+        return False, "credential-bearing URLs are not allowed"
+    host = parsed.hostname.rstrip(".").lower()
+    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+        return False, "local hostnames are not allowed"
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return False, "invalid URL port"
+    try:
+        addresses = {
+            item[4][0].split("%", 1)[0]
+            for item in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        }
+    except OSError as exc:
+        return False, f"hostname resolution failed: {redact(str(exc))[:120]}"
+    if not addresses:
+        return False, "hostname resolved to no addresses"
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            return False, "hostname resolved to an invalid address"
+        if not ip.is_global:
+            return False, f"non-public address is not allowed: {ip}"
+    return True, ""
+
+
 def check_url(url, contains_text=None, timeout=20):
     """Pass if the URL returns a 2xx and (optional) the body contains the text.
-    HTTPS/HTTP only — refuses file://, ftp://, etc."""
+    HTTPS/HTTP public targets only; rejects credentials, local/private addresses,
+    and redirects to non-public targets."""
     import urllib.request
     import urllib.error
-    from urllib.parse import urlparse
-    if urlparse(url).scheme not in ("http", "https"):
-        return False, "only http/https URLs are allowed"
+
+    safe, reason = _validate_public_url(url)
+    if not safe:
+        return False, reason
+
+    class PublicOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            redirect_safe, redirect_reason = _validate_public_url(newurl)
+            if not redirect_safe:
+                raise urllib.error.URLError(f"unsafe redirect blocked: {redirect_reason}")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    opener = urllib.request.build_opener(PublicOnlyRedirectHandler())
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with opener.open(url, timeout=timeout) as resp:
             code = resp.getcode()
             body = resp.read(200_000).decode("utf-8", "replace") if contains_text else ""
     except urllib.error.HTTPError as e:

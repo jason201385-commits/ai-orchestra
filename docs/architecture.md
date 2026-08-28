@@ -3,19 +3,20 @@
 `ai-orchestra` 刻意保持小巧：一組僅使用 Python 標準函式庫的腳本，圍繞一個設定檔與一個本地記帳檔。沒有伺服器、沒有常駐程式、沒有資料庫，也沒有任何需要 `pip install` 的東西。
 
 ```
-             config/providers.toml          (you declare your plans)
+ task contract ──► safety / permission boundary ──► bounded work stages
+                                                     │
+ config/providers.toml ──► route.py recommendation ──┤
+ quota cache + ledger + outcomes ────────────────────┘
+                                                     │
+        native subagents ◄── current coordinator ────┤
+                                                     ▼
+   stdin ──► dispatch.py ──► adapter ──► external provider ──► stdout
                       │
-                      ▼
-   stdin ──► dispatch.py ──► adapter ──► provider (CLI or HTTP API) ──► stdout
-                      │
-                      └──► data/ledger.jsonl  (one metered line per call)
-                                   │
-                      quota_probe.py (optional, best-effort)
-                                   │
-                                   ▼
-                          usage_report.py ──► terminal / data/dashboard.html
+                      └──► data/ledger.jsonl  (task-labelled call metadata)
 
-   verify.py ──► spawns dispatch.py per critic ──► adversarial verdict
+   verify.py ──► one cross-provider adversarial critic ──► evidence request
+   prove.py  ──► deterministic checks / replay ──────────► completion gate
+   record_outcome.py ──► proof/human-backed local outcome ──► future routing prior
 ```
 
 ## 元件
@@ -29,7 +30,18 @@
   - 對於 `openai`，執行單次 `chat/completions` POST；
   - 精確寫入一行記帳，並遮蔽機密。
 
+- **`route.py`** — 唯讀的路由建議器。它結合 task capability prior、billing mode、
+  新鮮 quota 狀態、本機 dispatch reliability 與已驗證 outcome。它不會自行派工，
+  也不把分數當成 provider 可用或任務完成的證明。
+
 - **`verify.py`** — 反幻覺交叉查核。它為每個對手（審查方）分別生成一個 `dispatch.py`（因此對手也會被記帳），餵給每一個要求提出證據的對抗式提示，並綜合出一個判定，明確拒絕把「一致但無來源」的認同視為已驗證。
+
+- **`prove.py`** — 重跑檔案、指令或 URL 檢查的 deterministic gate。它提供工作證明，
+  但簡單的 file-exists／HTTP 2xx 仍只能支撐對應的窄宣稱。
+
+- **`record_outcome.py`** — 將 proof 或人類驗收後的 local result 寫入
+  `data/outcomes.jsonl`。目前以唯一 proof label 連結 ledger，尚未綁定 artifact hash／
+  commit／deploy id；因此是路由 prior，不是高風險 release 的最終安全 gate。
 
 - **`quota_common.py`** — 記帳層共用的誠實原語：新鮮度分級（FRESH / RECENT / STALE / EXPIRED）、機密遮蔽，以及一套穩定的失敗分類規則集。
 
@@ -42,6 +54,10 @@
 3. **誠實優先於完整。** 未知是一等值。過時的資料會被標記，而且永遠不會被當成即時資料呈現。儀表板永遠不會憑空捏造一個零。
 4. **軟性失敗，大聲回報。** 單一供應商失敗永遠不會拖垮整趟執行；失敗會被分類並附上修復提示地浮現出來。
 5. **沒有隱藏狀態。** 一切都存在 `data/` 與 `config/` 底下的純檔案裡。刪除 `data/` 即可重置；其他都不會被動到。
+6. **同模型家族不構成獨立證據。** Native subagents 可做平行分工；獨立 critic 必須
+   排除目前 coordinator family，最後仍由 deterministic proof 裁決。
+7. **路由不越權。** Capability、quota、billing、health、outcome 只能調整建議排序，
+   不能擴大 agent 的 filesystem、network、production 或外部動作權限。
 
 ## 可攜性
 
